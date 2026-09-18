@@ -36,11 +36,20 @@ function payload(result) {
   return JSON.parse(block.text);
 }
 
-test("lists the three tools", { skip: !hasKey }, async () => {
+test("lists the registered tools", { skip: !hasKey }, async () => {
   await withClient(async (client) => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    assert.deepEqual(names, ["jev_classify", "jev_decide", "jev_find", "jev_screen", "jev_verify"]);
+    assert.deepEqual(names, [
+      "jev_classify",
+      "jev_coding_loop",
+      "jev_decide",
+      "jev_find",
+      "jev_gate",
+      "jev_review",
+      "jev_screen",
+      "jev_verify",
+    ]);
   });
 });
 
@@ -124,5 +133,62 @@ test("jev_find ranks the matching candidate and reports absence", { skip: !hasKe
     });
     const missBody = payload(miss);
     assert.equal(missBody.exists_verdict, "absent");
+  });
+});
+
+test("jev_coding_loop returns a next-step action", { skip: !hasKey }, async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "jev_coding_loop",
+      arguments: {
+        task: "Fix the login TypeError",
+        observation: "TypeError: Cannot read properties of undefined. Two tests failing in auth.test.ts.",
+      },
+    });
+    const body = payload(result);
+    assert.equal(body.tool, "jev_coding_loop");
+    assert.ok(["auto", "review", "escalate"].includes(body.action));
+    assert.ok(["continue", "retry", "ask_user", "stop", null].includes(body.next.choice));
+    if (body.next.choice === null) assert.notEqual(body.action, "auto");
+    assert.ok(body.usage);
+  });
+});
+
+test("jev_review scores a small local patch", { skip: !hasKey }, async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "jev_review",
+      arguments: {
+        request: "Reject empty parser input",
+        diff: "+ if (!input) throw new Error('Empty input');",
+        tests: "parser rejects empty input: PASS",
+      },
+    });
+    const body = payload(result);
+    assert.equal(body.tool, "jev_review");
+    assert.ok(["auto", "review", "escalate"].includes(body.action));
+    assert.equal(typeof body.composite, "number");
+    assert.equal(typeof body.safe_to_apply, "number");
+  });
+});
+
+test("jev_gate reviews a patch and verifies a completion claim", { skip: !hasKey }, async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "jev_gate",
+      arguments: {
+        request: "Reject empty parser input",
+        diff: "+ if (!input) throw new Error('Empty input');",
+        tests: "parser rejects empty input: PASS",
+        claims: ["The empty-input parser test passed."],
+        evidence: [{ id: "test-output", text: "parser rejects empty input: PASS" }],
+      },
+    });
+    const body = payload(result);
+    assert.equal(body.tool, "jev_gate");
+    assert.ok(["auto", "review", "escalate"].includes(body.action));
+    assert.ok(Array.isArray(body.reason_codes));
+    assert.equal(body.verification.results.length, 1);
+    assert.ok(body.usage);
   });
 });

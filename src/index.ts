@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 // jev-mcp: TypeSafe Jev as MCP judgment tools.
 //
-// Three purpose-built tools instead of a raw API passthrough — the question
+// Purpose-built tools instead of a raw API passthrough — the question
 // design lives here so every agent thread gets well-formed judgments:
 //
-//   jev_verify — check claims against evidence (citation-check pattern)
-//   jev_screen — guardrail fetched/external text before it enters context
-//   jev_find   — semantic search over candidates, no embeddings required
+//   jev_verify       — check claims against evidence (citation-check pattern)
+//   jev_screen       — guardrail fetched/external text before it enters context
+//   jev_find         — semantic search over candidates, no embeddings required
+//   jev_classify     — batched single-label classification
+//   jev_decide       — bounded alternative selection
+//   jev_coding_loop  — next step / model tier / focus / risk before another turn
+//   jev_review       — score a proposed diff before calling a task done
+//   jev_gate         — review a patch and verify completion claims in one call
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -14,11 +19,16 @@ import { choice, noul } from "@typesafe-ai/sdk";
 import { z } from "zod";
 import {
   classificationDecision,
+  codingLoopQuestions,
   contradictsRecommendation,
   DECIDE_ESCAPE_HATCHES,
   ensureUniqueIds,
   existsVerdict,
+  gateQuestions,
+  hasNonEmptyEvidence,
+  isIncompleteText,
   marginOf,
+  projectCodingLoop,
   MAX_CANDIDATES_DECIDE,
   MAX_CLASSES,
   MAX_ITEM_CHARS,
@@ -26,8 +36,15 @@ import {
   MAX_REQUIREMENTS,
   MAX_CANDIDATES,
   MAX_CANDIDATE_CHARS,
+  MAX_GATE_CLAIMS,
+  normalizeEvidence,
+  truncateCodingLoopState,
+  projectGate,
+  projectReview,
   rankCandidates,
   RELATION_TO_VERDICT,
+  resolvePolicyThresholds,
+  reviewQuestions,
   screenRecommendation,
   truncate,
   verifyAction,
@@ -103,13 +120,7 @@ server.registerTool(
   },
   async ({ claims, evidence: rawEvidence, auto_accept }) => {
     const autoAccept = auto_accept ?? 0.8;
-    const evidenceItems =
-      typeof rawEvidence === "string"
-        ? [{ id: "evidence", text: rawEvidence }]
-        : Array.isArray(rawEvidence)
-          ? rawEvidence
-          : [rawEvidence];
-    const { items: evidence } = ensureUniqueIds(evidenceItems, "evidence");
+    const evidence = normalizeEvidence(rawEvidence);
     const { items: claimItems } = ensureUniqueIds(claims.map((text) => ({ text })), "claim");
 
     const questions: Record<string, unknown> = {};
@@ -599,6 +610,180 @@ server.registerTool(
         contradicted.length > 0
           ? [`Requirement${contradicted.length > 1 ? "s" : ""} ${contradicted.map((i) => i + 1).join(", ")} contradicted by the recommended candidate; inspect before acting`]
           : [],
+      usage,
+    });
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// jev_coding_loop
+// ─────────────────────────────────────────────────────────────────────────────
+server.registerTool(
+  "jev_coding_loop",
+  {
+    title: "Choose the next coding-agent step",
+    description:
+      "Call before spending another expensive agent turn. TypeSafe Jev returns the next step " +
+      "(continue | retry | ask_user | stop), a model tier (cheap | standard | reasoning), a focus " +
+      "(edit | search | test | read | plan), a 0–2 risk score, and completion signals. " +
+      "Unknown next / model_tier / focus labels project as null; unknown next is never auto. " +
+      "Action is auto | review | escalate: low next-step confidence escalates, ask_user requires review, " +
+      "and high risk is never auto. Automatic stop also needs done_enough >= 0.7 and low risk. " +
+      "Jev does not write code. Use jev_review or jev_gate when scoring a finished patch.",
+    inputSchema: {
+      task: z.string().min(1).describe("What the coding agent is trying to do."),
+      observation: z
+        .string()
+        .min(1)
+        .describe("Current turn: last diff, command output, test results, or blocker."),
+      extras: z
+        .record(z.any())
+        .optional()
+        .describe("Optional extra JSON included in Jev state."),
+      auto_accept: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("Next-step confidence at or above this may stand automatically when risk is low. Default 0.8."),
+      review_at: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("Next-step confidence below this escalates. Must be <= auto_accept. Omitted default is min(0.5, auto_accept)."),
+    },
+  },
+  async ({ task, observation, extras, auto_accept, review_at }) => {
+    const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept, review_at);
+
+    const state = truncateCodingLoopState({ task, observation, extras: extras ?? {} });
+    const incomplete = isIncompleteText(state);
+    const { answers, usage, provider, model } = await askJev(state, codingLoopQuestions());
+
+    return text({
+      tool: "jev_coding_loop",
+      model,
+      provider,
+      truncated: incomplete,
+      ...projectCodingLoop(answers, autoAccept, reviewAt, incomplete),
+      usage,
+    });
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// jev_review
+// ─────────────────────────────────────────────────────────────────────────────
+server.registerTool(
+  "jev_review",
+  {
+    title: "Review a proposed patch",
+    description:
+      "Score a proposed diff before declaring the task done. Does not apply the patch. " +
+      "Returns 0–2 scores for correctness, spec match, test gap, and blast radius (the last two " +
+      "are inverted in the composite), plus a safe_to_apply probability and an auto | review | escalate " +
+      "action. Auto requires a safe composite, safe_to_apply at auto_accept, and high min confidence. " +
+      "Use jev_gate when you also need to verify completion claims against evidence in the same call. " +
+      "Use jev_verify alone for claims without a patch review.",
+    inputSchema: {
+      request: z.string().min(1).describe("What the user asked for."),
+      diff: z.string().min(1).describe("Proposed patch, file excerpt, or change summary."),
+      tests: z.string().optional().describe("Test output if any."),
+      auto_accept: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("safe_to_apply and min score confidence at or above this may stand automatically. Default 0.8."),
+      review_at: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("Min score confidence below this escalates. Must be <= auto_accept. Omitted default is min(0.5, auto_accept)."),
+    },
+  },
+  async ({ request, diff, tests, auto_accept, review_at }) => {
+    const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept, review_at);
+
+    const state = truncateCodingLoopState({ request, diff, tests: tests ?? "" });
+    const incomplete = isIncompleteText(state);
+    const { answers, usage, provider, model } = await askJev(state, reviewQuestions());
+
+    return text({
+      tool: "jev_review",
+      model,
+      provider,
+      truncated: incomplete,
+      ...projectReview(answers, autoAccept, reviewAt, incomplete),
+      usage,
+    });
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// jev_gate
+// ─────────────────────────────────────────────────────────────────────────────
+server.registerTool(
+  "jev_gate",
+  {
+    title: "Gate completion: review a patch and verify claims",
+    description:
+      "Review a proposed patch and verify completion claims against supplied evidence in one Jev call. " +
+      "Does not run tests or apply changes. Auto only when the review is accepted and every claim is " +
+      "verified at or above auto_accept. Unsupported claims require review; a confident contradiction " +
+      "or low claim confidence escalates. Evidence must include at least one non-empty document. " +
+      "Put supporting diff excerpts and test logs in evidence when claims depend on them — request and claims are assertions, not proof. " +
+      "Use jev_review for a patch without claims, jev_verify for claims without a patch review.",
+    inputSchema: {
+      request: z.string().min(1).describe("What the user asked for; this is not evidence of completion."),
+      diff: z.string().min(1).describe("Proposed patch, file excerpt, or change summary to review."),
+      claims: z
+        .array(z.string().min(1))
+        .min(1)
+        .max(MAX_GATE_CLAIMS)
+        .describe(`Completion claims to check against evidence. Up to ${MAX_GATE_CLAIMS} in one call.`),
+      evidence: evidenceSchema
+        .refine(hasNonEmptyEvidence, {
+          message: "jev_gate requires at least one non-empty evidence text.",
+        })
+        .describe(
+          "Sources that support the claims; at least one item must have non-empty text. Include relevant diff or test logs when a claim depends on them.",
+        ),
+      tests: z.string().optional().describe("Test output for the patch review."),
+      auto_accept: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("Review and per-claim confidence at or above this may stand automatically. Default 0.8."),
+      review_at: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("Min review-score confidence or per-claim confidence below this escalates. Must be <= auto_accept. Omitted default is min(0.5, auto_accept)."),
+    },
+  },
+  async ({ request, diff, claims, evidence: rawEvidence, tests, auto_accept, review_at }) => {
+    const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept, review_at);
+
+    const evidence = normalizeEvidence(rawEvidence);
+    if (!hasNonEmptyEvidence(evidence)) {
+      throw new Error("jev_gate requires at least one non-empty evidence text.");
+    }
+
+    const state = truncateCodingLoopState({ request, diff, tests: tests ?? "", claims, evidence });
+    const incomplete = isIncompleteText(state);
+    const { answers, usage, provider, model } = await askJev(state, gateQuestions(claims.length));
+
+    return text({
+      tool: "jev_gate",
+      model,
+      provider,
+      truncated: incomplete,
+      ...projectGate(answers, claims, autoAccept, reviewAt, incomplete),
       usage,
     });
   },
