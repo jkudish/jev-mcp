@@ -218,6 +218,12 @@ export function rerankByScore<T extends object>(candidates: T[], scores: number[
 /** Max completion claims per jev_gate call; each claim adds one Choice question. */
 export const MAX_GATE_CLAIMS = 16;
 
+/** Max evidence items per jev_gate call, so one request stays bounded. */
+export const MAX_GATE_EVIDENCE_ITEMS = 16;
+
+/** Aggregate evidence budget (characters) per jev_gate call, before per-item truncation. */
+export const MAX_GATE_EVIDENCE_CHARS = 200_000;
+
 /** Per-document cap (characters) for request, diff, tests, and evidence texts. */
 export const MAX_REVIEW_DOC_CHARS = 50_000;
 
@@ -301,19 +307,21 @@ export function reviewComposite(scores: {
 }
 
 /**
- * Patch-review action. Escalates when score confidence or safe_to_apply falls
- * below review_at; auto only when safe_to_apply and min confidence reach
- * auto_accept and the composite clears composite_floor; otherwise review.
+ * Patch-review action. Escalates when score confidence or safe_to_apply is
+ * unknown or below review_at; auto only when safe_to_apply and min confidence
+ * reach auto_accept and the composite clears composite_floor; otherwise review.
+ * Unknown confidence is escalate, never a value that can satisfy a threshold.
  */
 export function reviewAction(input: {
   composite: number;
   safeToApply: number;
-  minConfidence: number;
+  minConfidence: number | null;
   autoAccept: number;
   reviewAt: number;
   compositeFloor: number;
 }): PolicyAction {
-  if (input.minConfidence < input.reviewAt || input.safeToApply < input.reviewAt) return "escalate";
+  if (input.minConfidence === null || input.minConfidence < input.reviewAt || input.safeToApply < input.reviewAt)
+    return "escalate";
   if (
     input.safeToApply >= input.autoAccept &&
     input.composite >= input.compositeFloor &&
@@ -324,9 +332,18 @@ export function reviewAction(input: {
   return "review";
 }
 
-/** Per-claim action: low confidence and confident contradictions escalate; only confident verification is auto. */
-export function claimAction(verdict: ClaimVerdict, confidence: number, autoAccept: number, reviewAt: number): PolicyAction {
-  if (confidence < reviewAt) return "escalate";
+/**
+ * Per-claim action: unknown or low confidence and confident contradictions
+ * escalate; only confident verification is auto. Unknown confidence can never
+ * satisfy a threshold, even a zero one.
+ */
+export function claimAction(
+  verdict: ClaimVerdict,
+  confidence: number | null,
+  autoAccept: number,
+  reviewAt: number,
+): PolicyAction {
+  if (confidence === null || confidence < reviewAt) return "escalate";
   if (verdict === "contradicted" && confidence >= autoAccept) return "escalate";
   return verdict === "verified" && confidence >= autoAccept ? "auto" : "review";
 }

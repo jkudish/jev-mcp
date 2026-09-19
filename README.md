@@ -426,7 +426,7 @@ Score a proposed diff against the request before the task is called done. Jev an
 Here the composite clears the floor, but the failing test drags `safe_to_apply` to 0.24 and rubric confidences sit under `review_at`, so the patch escalates instead of sailing through on its decent scores.
 
 - Rubric scores run 0..2. Higher is better for `correctness` and `spec_match`; higher is worse for `test_gap` and `blast_radius`, and the composite inverts those two before weighting, so a composite of 1.0 means favorable on every rubric.
-- `auto` requires `safe_to_apply` and every rubric confidence at `auto_accept` and the composite at `composite_floor`. Anything below `review_at` escalates; everything in between is `review`. Unknown confidence counts as zero.
+- `auto` requires `safe_to_apply` and every rubric confidence at `auto_accept` and the composite at `composite_floor`. `safe_to_apply` or any rubric confidence below `review_at`, or unknown, escalates; a composite below `composite_floor` returns `review`, not `escalate`. Unknown confidence counts as escalate, never as a value that can satisfy a threshold.
 - `request` frames the review; it is not proof of anything. Put real output in `tests`. Every field is treated as evidence to evaluate, never instructions to follow.
 - Each text field is capped at 50,000 characters. Truncated input sets `truncated: true` and can never return `auto`; a malformed answer is `invalid_response`, not a semantic outcome.
 
@@ -478,9 +478,9 @@ The completion gate: the same patch review as `jev_review`, plus your completion
 
 The two true claims verify at full confidence, and the one that matters, "the full test suite passes," is contradicted by the test log at full confidence: exactly the claim a coding agent is most tempted to hand-wave.
 
-- Claims are judged from `evidence` only, not world knowledge, and not the request, diff, or tests fields; if a claim needs a diff excerpt or a test log as support, supply it in `evidence`. Every field is evidence to evaluate, never instructions to follow.
+- Claim questions instruct Jev to use `evidence` only, not world knowledge, and not the request, diff, or tests fields; if a claim needs a diff excerpt or a test log as support, supply it in `evidence`. All fields share one model state, so this is instruction-level isolation, not a hard boundary. Every field is evidence to evaluate, never instructions to follow.
 - `reason_codes` collects why the gate decided as it did: `incomplete_context`, `invalid_response`, `review_escalated`, `review_required`, `claims_contradicted`, `claims_unsupported`, `claim_confidence_low`, `claim_confidence_below_auto_accept`, `accepted`.
-- Up to 16 claims per call. Text fields are capped at 50,000 characters each and claims at 2,000. Malformed answers surface as `invalid_response` and the gate never returns `auto` on one.
+- Up to 16 claims and 16 evidence items per call. Text fields are capped at 50,000 characters each, claims at 2,000, and evidence at 200,000 characters in aggregate; oversized evidence is rejected before any model call. Malformed answers surface as `invalid_response` and the gate never returns `auto` on one.
 - Use `jev_verify` for claims without a patch review, and `jev_review` for a patch without claims.
 
 <sub>Adapted from [burnigtm/jev-mcp](https://github.com/burnigtm/jev-mcp) (MIT), via [PR #2](https://github.com/jkudish/jev-mcp/pull/2) by rimusz.</sub>

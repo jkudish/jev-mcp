@@ -38,6 +38,8 @@ import {
   MAX_CANDIDATES,
   MAX_CANDIDATE_CHARS,
   MAX_GATE_CLAIMS,
+  MAX_GATE_EVIDENCE_CHARS,
+  MAX_GATE_EVIDENCE_ITEMS,
   MAX_CLAIM_CHARS,
   MAX_REVIEW_DOC_CHARS,
   normalizeEvidence,
@@ -1215,7 +1217,10 @@ function projectReviewHalf(
     testGap: valid.test_gap.score,
     blastRadius: valid.blast_radius.score,
   });
-  const minConfidence = Math.min(...rubrics.map((r) => valid[r].confidence ?? 0));
+  // Unknown confidence on any rubric is unknown overall: it must not become a
+  // number that can satisfy a threshold (a bare zero would, at auto_accept 0).
+  const rubricConfidences = rubrics.map((r) => valid[r].confidence);
+  const minConfidence = rubricConfidences.some((c) => c === null) ? null : (Math.min(...(rubricConfidences as number[])) as number);
   const action = requireCompleteContext(
     reviewAction({ composite, safeToApply: safeToApply!, minConfidence, ...thresholds }),
     truncated,
@@ -1295,9 +1300,10 @@ server.registerTool(
     description:
       "Review a proposed patch and verify completion claims against supplied evidence in one TypeSafe Jev call. " +
       "Auto only when the patch review is accepted and every claim is verified at or above auto_accept. " +
-      "Unsupported claims require review; confident contradictions or low confidence escalate. " +
+      "Unsupported claims require review; confident contradictions, unknown confidence, or low confidence escalate. " +
       "The request and claims are assertions to check, never proof; put supporting diff excerpts and test logs in " +
-      "evidence. Does not run tests or apply changes. Use jev_review for a patch without claims, jev_verify for " +
+      "evidence. Evidence is capped at 16 items and 200,000 characters in aggregate. " +
+      "Does not run tests or apply changes. Use jev_review for a patch without claims, jev_verify for " +
       "claims without a patch review.",
     inputSchema: {
       request: z.string().min(1).describe("What the user asked for; this is not evidence of completion."),
@@ -1338,6 +1344,27 @@ server.registerTool(
     const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept ?? 0.8, review_at);
     const compositeFloor = composite_floor ?? DEFAULT_COMPOSITE_FLOOR;
     const evidence = normalizeEvidence(rawEvidence as never);
+
+    // Bound the request before any model call: item count and aggregate size.
+    if (evidence.length > MAX_GATE_EVIDENCE_ITEMS) {
+      return {
+        ...text({
+          tool: "jev_gate",
+          error: `evidence exceeds ${MAX_GATE_EVIDENCE_ITEMS} items; split the gate or trim the evidence.`,
+        }),
+        isError: true,
+      };
+    }
+    const evidenceChars = evidence.reduce((sum, item) => sum + item.text.length, 0);
+    if (evidenceChars > MAX_GATE_EVIDENCE_CHARS) {
+      return {
+        ...text({
+          tool: "jev_gate",
+          error: `evidence exceeds the ${MAX_GATE_EVIDENCE_CHARS.toLocaleString("en-US")}-character aggregate budget; split the gate or trim the evidence.`,
+        }),
+        isError: true,
+      };
+    }
 
     const truncated =
       request.length > MAX_REVIEW_DOC_CHARS ||
@@ -1409,7 +1436,7 @@ server.registerTool(
         };
       }
       const verdict = answer.choice as "verified" | "contradicted" | "unsupported";
-      const action = requireCompleteContext(claimAction(verdict, answer.confidence ?? 0, autoAccept, reviewAt), truncated);
+      const action = requireCompleteContext(claimAction(verdict, answer.confidence, autoAccept, reviewAt), truncated);
       return { claim, verdict, confidence: answer.confidence, probabilities: answer.probabilities, action };
     });
 
@@ -1434,7 +1461,7 @@ server.registerTool(
     if (review.action === "review") reasonCodes.push("review_required");
     if (verification.summary.contradicted > 0) reasonCodes.push("claims_contradicted");
     if (verification.summary.unsupported > 0) reasonCodes.push("claims_unsupported");
-    const confidences = results.filter((r) => r.status !== "invalid_response").map((r) => r.confidence ?? 0);
+    const confidences = results.filter((r) => r.status !== "invalid_response").map((r) => r.confidence ?? -1);
     if (confidences.some((c) => c < reviewAt)) reasonCodes.push("claim_confidence_low");
     if (confidences.some((c) => c >= reviewAt && c < autoAccept)) reasonCodes.push("claim_confidence_below_auto_accept");
     if (action === "auto") reasonCodes.push("accepted");

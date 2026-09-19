@@ -230,6 +230,13 @@ test("reviewAction gates auto on safe_to_apply, min confidence, and composite fl
   assert.equal(reviewAction({ ...pass, safeToApply: 0.6, autoAccept: 0.8, reviewAt: 0.5, compositeFloor: 0.7 }), "review");
 });
 
+test("reviewAction treats unknown confidence as escalate even at zero thresholds", () => {
+  const pass = { composite: 0.9, safeToApply: 0.95, minConfidence: null };
+  // A bare zero coercion would satisfy auto_accept 0 and review_at 0.
+  assert.equal(reviewAction({ ...pass, autoAccept: 0, reviewAt: 0, compositeFloor: 0 }), "escalate");
+  assert.equal(reviewAction({ ...pass, autoAccept: 0.8, reviewAt: 0.5, compositeFloor: 0.7 }), "escalate");
+});
+
 test("requireCompleteContext demotes only auto and preserves stronger actions", () => {
   assert.equal(requireCompleteContext("auto", true), "review");
   assert.equal(requireCompleteContext("auto", false), "auto");
@@ -244,6 +251,11 @@ test("claimAction escalates low confidence and confident contradictions", () => 
   assert.equal(claimAction("contradicted", 0.95, 0.8, 0.5), "escalate");
   assert.equal(claimAction("contradicted", 0.6, 0.8, 0.5), "review");
   assert.equal(claimAction("unsupported", 0.95, 0.8, 0.5), "review");
+});
+
+test("claimAction treats unknown confidence as escalate even at zero thresholds", () => {
+  assert.equal(claimAction("verified", null, 0, 0), "escalate");
+  assert.equal(claimAction("verified", null, 0.8, 0.5), "escalate");
 });
 
 test("worstAction picks the most severe action", () => {
