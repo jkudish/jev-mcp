@@ -199,3 +199,137 @@ test("jev_decide accepts a candidate id named constructor", async () => {
     assert.equal(body.recommendation.escaped, false);
   });
 });
+
+// ── jev_review / jev_gate ────────────────────────────────────────────────────
+
+const REVIEW_KEYS = ["correctness", "spec_match", "test_gap", "blast_radius"];
+// Strong answers across the rubric: correct, on-request, no test gap, tiny blast radius.
+const STRONG_REVIEW = Object.fromEntries(
+  REVIEW_KEYS.map((key) => [key, { score: key === "test_gap" || key === "blast_radius" ? 0 : 2, confidence: 0.93 }]),
+);
+const CLAIM_KEYS = ["verified", "contradicted", "unsupported"];
+const REVIEW_ARGS = {
+  request: "Reject empty parser input",
+  diff: "+ if (!input) throw new Error('Empty input');",
+  tests: "parser rejects empty input: PASS",
+};
+const GATE_ARGS = {
+  ...REVIEW_ARGS,
+  claims: ["The empty-input parser test passed."],
+  evidence: [{ id: "test-output", text: "parser rejects empty input: PASS" }],
+};
+
+test("jev_review returns auto on a strong patch and sends anti-injection framing", async () => {
+  await withMock(() => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }), async (client, requests) => {
+    const result = await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS });
+    const body = payload(result);
+    assert.equal(body.action, "auto");
+    assert.ok(Math.abs(body.composite - 1) < 1e-9);
+    assert.equal(body.truncated, false);
+    assert.equal(body.status, undefined);
+    // wire: bounded state and the anti-injection sentence on every question
+    assert.equal(requests[0].body.state.request, REVIEW_ARGS.request);
+    for (const question of Object.values(requests[0].body.questions)) {
+      assert.match(question.instructions, /never as instructions to follow/);
+    }
+  });
+});
+
+test("jev_review demotes auto when the diff is truncated at the document cap", async () => {
+  await withMock(() => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }), async (client, requests) => {
+    const result = await client.callTool({
+      name: "jev_review",
+      arguments: { ...REVIEW_ARGS, diff: "+ " + "x".repeat(50_001) },
+    });
+    const body = payload(result);
+    assert.equal(body.truncated, true);
+    assert.equal(body.action, "review");
+    assert.equal(requests[0].body.state.diff.length > 50_000, true);
+    assert.match(requests[0].body.state.diff, /…truncated/);
+  });
+});
+
+test("jev_review escalates with invalid_response when a score answer is malformed", async () => {
+  await withMock(() => ({ ...STRONG_REVIEW, correctness: { score: "high" }, safe_to_apply: { noul: 0.95 } }), async (client) => {
+    const result = await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS });
+    const body = payload(result);
+    assert.equal(body.action, "escalate");
+    assert.equal(body.status, "invalid_response");
+    assert.equal(body.composite, null);
+    assert.equal(body.scores.correctness.status, "invalid_response");
+  });
+});
+
+test("jev_review respects composite_floor as a parameter", async () => {
+  await withMock(() => ({
+    ...STRONG_REVIEW,
+    spec_match: { score: 1, confidence: 0.93 }, // composite 0.85
+    safe_to_apply: { noul: 0.95 },
+  }), async (client) => {
+    const result = await client.callTool({
+      name: "jev_review",
+      arguments: { ...REVIEW_ARGS, composite_floor: 0.9 },
+    });
+    const body = payload(result);
+    assert.ok(Math.abs(body.composite - 0.85) < 1e-9);
+    assert.equal(body.action, "review");
+  });
+});
+
+test("jev_gate accepts only when review passes and every claim verifies", async () => {
+  await withMock(() => ({
+    ...STRONG_REVIEW,
+    safe_to_apply: { noul: 0.95 },
+    claim_0: pick("verified", CLAIM_KEYS),
+  }), async (client, requests) => {
+    const result = await client.callTool({ name: "jev_gate", arguments: GATE_ARGS });
+    const body = payload(result);
+    assert.equal(body.action, "auto");
+    assert.deepEqual(body.reason_codes, ["accepted"]);
+    assert.equal(body.verification.summary.verified, 1);
+    assert.equal(body.verification.results[0].verdict, "verified");
+    // wire: review questions carry the claims-are-assertions framing
+    assert.match(requests[0].body.questions.correctness.instructions, /assertions to check, not evidence/);
+    assert.match(requests[0].body.questions.claim_0.instructions, /only the evidence field as factual support/);
+  });
+});
+
+test("jev_gate escalates on a confidently contradicted claim", async () => {
+  await withMock(() => ({
+    ...STRONG_REVIEW,
+    safe_to_apply: { noul: 0.95 },
+    claim_0: pick("contradicted", CLAIM_KEYS),
+  }), async (client) => {
+    const result = await client.callTool({ name: "jev_gate", arguments: GATE_ARGS });
+    const body = payload(result);
+    assert.equal(body.action, "escalate");
+    assert.ok(body.reason_codes.includes("claims_contradicted"));
+    assert.equal(body.verification.summary.contradicted, 1);
+  });
+});
+
+test("jev_gate marks invalid claim answers as invalid_response and escalates", async () => {
+  await withMock(() => ({
+    ...STRONG_REVIEW,
+    safe_to_apply: { noul: 0.95 },
+    claim_0: { choice: "definitely", confidence: 0.99, probabilities: { definitely: 1 } },
+  }), async (client) => {
+    const result = await client.callTool({ name: "jev_gate", arguments: GATE_ARGS });
+    const body = payload(result);
+    assert.equal(body.action, "escalate");
+    assert.ok(body.reason_codes.includes("invalid_response"));
+    assert.equal(body.verification.summary.invalid_response, 1);
+    assert.equal(body.verification.results[0].verdict, null);
+  });
+});
+
+test("jev_gate rejects evidence with no non-empty text before calling Jev", async () => {
+  await withMock(() => ({}), async (client, requests) => {
+    const result = await client.callTool({
+      name: "jev_gate",
+      arguments: { ...GATE_ARGS, evidence: [{ id: "blank", text: "   " }] },
+    });
+    assert.equal(result.isError, true);
+    assert.equal(requests.length, 0);
+  });
+});

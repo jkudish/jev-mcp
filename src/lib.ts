@@ -208,3 +208,146 @@ export function rerankByScore<T extends object>(candidates: T[], scores: number[
     .map((c, i) => ({ ...c, relevance: scores[i] ?? 0 }))
     .sort((a, b) => b.relevance - a.relevance);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Patch review and completion gate (jev_review / jev_gate)
+// Question design adapted from burnigtm/jev-mcp (MIT) via PR #2 by rimusz;
+// thresholds are parameters and arithmetic stays here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Max completion claims per jev_gate call; each claim adds one Choice question. */
+export const MAX_GATE_CLAIMS = 16;
+
+/** Per-document cap (characters) for request, diff, tests, and evidence texts. */
+export const MAX_REVIEW_DOC_CHARS = 50_000;
+
+/** Per-claim cap (characters) in jev_gate; claims are bounded assertions. */
+export const MAX_CLAIM_CHARS = 2_000;
+
+/** Default composite floor: auto requires the weighted composite at or above this. */
+export const DEFAULT_COMPOSITE_FLOOR = 0.7;
+
+/**
+ * Review rubric weights. Correctness and spec match contribute directly;
+ * test gap and blast radius are inverted first, so a high gap or wide radius
+ * lowers the composite.
+ */
+export const REVIEW_WEIGHTS = {
+  correctness: 0.4,
+  spec_match: 0.3,
+  test_gap: 0.15,
+  blast_radius: 0.15,
+} as const;
+
+/** The three claim verdicts jev_gate checks, mirroring jev_verify's evidence relation. */
+export const VERIFY_CLAIM_CRITERIA: Record<string, string> = {
+  verified: "The evidence clearly supports the claim",
+  contradicted: "The evidence contradicts the claim",
+  unsupported: "The evidence neither supports nor contradicts the claim",
+};
+
+export type PolicyAction = "auto" | "review" | "escalate";
+export type ClaimVerdict = "verified" | "contradicted" | "unsupported";
+
+/** Policy thresholds must satisfy 0 <= review_at <= auto_accept <= 1. */
+export function validatePolicyThresholds(autoAccept: number, reviewAt: number): void {
+  if (
+    !Number.isFinite(autoAccept) ||
+    !Number.isFinite(reviewAt) ||
+    autoAccept < 0 ||
+    autoAccept > 1 ||
+    reviewAt < 0 ||
+    reviewAt > 1 ||
+    reviewAt > autoAccept
+  ) {
+    throw new Error("Thresholds must satisfy 0 <= review_at <= auto_accept <= 1.");
+  }
+}
+
+/** Fill an omitted review_at so a lone low auto_accept cannot invert the pair. */
+export function resolvePolicyThresholds(
+  autoAccept = 0.8,
+  reviewAt?: number,
+): { autoAccept: number; reviewAt: number } {
+  const resolved = reviewAt ?? Math.min(0.5, autoAccept);
+  validatePolicyThresholds(autoAccept, resolved);
+  return { autoAccept, reviewAt: resolved };
+}
+
+/** Truncated input is incomplete context; it never permits auto, only stronger actions. */
+export function requireCompleteContext(action: PolicyAction, truncated: boolean): PolicyAction {
+  return truncated && action === "auto" ? "review" : action;
+}
+
+/** Weighted 0..1 composite from 0..2 rubric scores, inverting test gap and blast radius. */
+export function reviewComposite(scores: {
+  correctness: number;
+  specMatch: number;
+  testGap: number;
+  blastRadius: number;
+}): number {
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  const clamp02 = (v: number) => Math.min(2, Math.max(0, v));
+  const correctness = clamp01(clamp02(scores.correctness) / 2);
+  const specMatch = clamp01(clamp02(scores.specMatch) / 2);
+  const tests = clamp01(1 - clamp02(scores.testGap) / 2);
+  const blast = clamp01(1 - clamp02(scores.blastRadius) / 2);
+  return (
+    REVIEW_WEIGHTS.correctness * correctness +
+    REVIEW_WEIGHTS.spec_match * specMatch +
+    REVIEW_WEIGHTS.test_gap * tests +
+    REVIEW_WEIGHTS.blast_radius * blast
+  );
+}
+
+/**
+ * Patch-review action. Escalates when score confidence or safe_to_apply falls
+ * below review_at; auto only when safe_to_apply and min confidence reach
+ * auto_accept and the composite clears composite_floor; otherwise review.
+ */
+export function reviewAction(input: {
+  composite: number;
+  safeToApply: number;
+  minConfidence: number;
+  autoAccept: number;
+  reviewAt: number;
+  compositeFloor: number;
+}): PolicyAction {
+  if (input.minConfidence < input.reviewAt || input.safeToApply < input.reviewAt) return "escalate";
+  if (
+    input.safeToApply >= input.autoAccept &&
+    input.composite >= input.compositeFloor &&
+    input.minConfidence >= input.autoAccept
+  ) {
+    return "auto";
+  }
+  return "review";
+}
+
+/** Per-claim action: low confidence and confident contradictions escalate; only confident verification is auto. */
+export function claimAction(verdict: ClaimVerdict, confidence: number, autoAccept: number, reviewAt: number): PolicyAction {
+  if (confidence < reviewAt) return "escalate";
+  if (verdict === "contradicted" && confidence >= autoAccept) return "escalate";
+  return verdict === "verified" && confidence >= autoAccept ? "auto" : "review";
+}
+
+/** The most severe action wins; a gate is only as strong as its weakest judgment. */
+export function worstAction(actions: PolicyAction[]): PolicyAction {
+  if (actions.includes("escalate")) return "escalate";
+  if (actions.includes("review")) return "review";
+  return "auto";
+}
+
+export type ReviewEvidenceInput = string | { id?: string; text: string } | Array<{ id?: string; text: string }>;
+
+/** Normalize evidence to {id,text} items with unique ids, same shape as jev_verify. */
+export function normalizeEvidence(raw: ReviewEvidenceInput): Array<{ id: string; text: string }> {
+  const items =
+    typeof raw === "string" ? [{ id: "evidence", text: raw }] : Array.isArray(raw) ? raw : [raw];
+  return ensureUniqueIds(items, "evidence").items;
+}
+
+/** True when at least one evidence item carries non-whitespace text. */
+export function hasNonEmptyEvidence(items: Array<{ id: string; text: string }>): boolean {
+  return items.some((item) => item.text.trim().length > 0);
+}

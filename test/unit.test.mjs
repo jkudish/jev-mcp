@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  claimAction,
   classificationDecision,
   contradictsRecommendation,
   DECIDE_ESCAPE_HATCHES,
@@ -9,12 +10,22 @@ import {
   marginOf,
   MAX_CANDIDATES,
   MAX_CANDIDATES_DECIDE,
+  MAX_CLAIM_CHARS,
+  MAX_GATE_CLAIMS,
+  MAX_REVIEW_DOC_CHARS,
   MAX_CLASSES,
   MAX_ITEM_CHARS,
   MAX_ITEMS,
   MAX_REQUIREMENTS,
   rankCandidates,
   RELATION_TO_VERDICT,
+  requireCompleteContext,
+  resolvePolicyThresholds,
+  reviewAction,
+  reviewComposite,
+  worstAction,
+  normalizeEvidence,
+  hasNonEmptyEvidence,
   sanitizeId,
   screenRecommendation,
   truncate,
@@ -178,4 +189,85 @@ test("COMPARE_RELATIONS and ASPECT_RELATIONS share the same three keys", () => {
   assert.deepEqual(overall, aspect);
   // the aspect wording must say what "not both address it" means
   assert.match(ASPECT_RELATIONS.different_facts, /does not both|at least one/i);
+});
+
+// ── jev_review / jev_gate helpers ────────────────────────────────────────────
+
+test("resolvePolicyThresholds fills and validates the threshold pair", () => {
+  assert.deepEqual(resolvePolicyThresholds(0.8), { autoAccept: 0.8, reviewAt: 0.5 });
+  // a lone low auto_accept cannot invert the pair
+  assert.deepEqual(resolvePolicyThresholds(0.3), { autoAccept: 0.3, reviewAt: 0.3 });
+  assert.deepEqual(resolvePolicyThresholds(0.9, 0.6), { autoAccept: 0.9, reviewAt: 0.6 });
+  assert.throws(() => resolvePolicyThresholds(0.5, 0.8), /0 <= review_at <= auto_accept <= 1/);
+  assert.throws(() => resolvePolicyThresholds(1.2), /0 <= review_at <= auto_accept <= 1/);
+});
+
+test("reviewComposite weights rubrics and inverts test gap and blast radius", () => {
+  const perfect = reviewComposite({ correctness: 2, specMatch: 2, testGap: 0, blastRadius: 0 });
+  assert.ok(Math.abs(perfect - 1) < 1e-9);
+  const worst = reviewComposite({ correctness: 0, specMatch: 0, testGap: 2, blastRadius: 2 });
+  assert.ok(Math.abs(worst - 0) < 1e-9);
+  // out-of-range scores are clamped, never extrapolated
+  const clamped = reviewComposite({ correctness: 9, specMatch: 3, testGap: -1, blastRadius: -5 });
+  assert.ok(Math.abs(clamped - perfect) < 1e-9);
+  // weights: correctness 0.4, spec match 0.3, tests 0.15, blast 0.15.
+  // Good tests and tiny blast contribute fully, so zero them to isolate correctness.
+  const mid = reviewComposite({ correctness: 2, specMatch: 0, testGap: 2, blastRadius: 2 });
+  assert.ok(Math.abs(mid - 0.4) < 1e-9);
+});
+
+test("reviewAction gates auto on safe_to_apply, min confidence, and composite floor", () => {
+  const pass = { composite: 0.9, safeToApply: 0.95, minConfidence: 0.9 };
+  assert.equal(reviewAction({ ...pass, autoAccept: 0.8, reviewAt: 0.5, compositeFloor: 0.7 }), "auto");
+  // composite below the floor demotes to review, not escalate
+  assert.equal(reviewAction({ ...pass, composite: 0.5, autoAccept: 0.8, reviewAt: 0.5, compositeFloor: 0.7 }), "review");
+  // a higher floor is respected
+  assert.equal(reviewAction({ ...pass, composite: 0.75, autoAccept: 0.8, reviewAt: 0.5, compositeFloor: 0.8 }), "review");
+  // low safe_to_apply or low min confidence escalates via review_at
+  assert.equal(reviewAction({ ...pass, safeToApply: 0.4, autoAccept: 0.8, reviewAt: 0.5, compositeFloor: 0.7 }), "escalate");
+  assert.equal(reviewAction({ ...pass, minConfidence: 0.2, autoAccept: 0.8, reviewAt: 0.5, compositeFloor: 0.7 }), "escalate");
+  // between review_at and auto_accept reviews
+  assert.equal(reviewAction({ ...pass, safeToApply: 0.6, autoAccept: 0.8, reviewAt: 0.5, compositeFloor: 0.7 }), "review");
+});
+
+test("requireCompleteContext demotes only auto and preserves stronger actions", () => {
+  assert.equal(requireCompleteContext("auto", true), "review");
+  assert.equal(requireCompleteContext("auto", false), "auto");
+  assert.equal(requireCompleteContext("escalate", true), "escalate");
+  assert.equal(requireCompleteContext("review", true), "review");
+});
+
+test("claimAction escalates low confidence and confident contradictions", () => {
+  assert.equal(claimAction("verified", 0.95, 0.8, 0.5), "auto");
+  assert.equal(claimAction("verified", 0.6, 0.8, 0.5), "review");
+  assert.equal(claimAction("verified", 0.3, 0.8, 0.5), "escalate");
+  assert.equal(claimAction("contradicted", 0.95, 0.8, 0.5), "escalate");
+  assert.equal(claimAction("contradicted", 0.6, 0.8, 0.5), "review");
+  assert.equal(claimAction("unsupported", 0.95, 0.8, 0.5), "review");
+});
+
+test("worstAction picks the most severe action", () => {
+  assert.equal(worstAction(["auto", "review"]), "review");
+  assert.equal(worstAction(["auto", "review", "escalate"]), "escalate");
+  assert.equal(worstAction(["auto"]), "auto");
+  assert.equal(worstAction([]), "auto");
+});
+
+test("normalizeEvidence and hasNonEmptyEvidence match jev_verify shapes", () => {
+  assert.deepEqual(normalizeEvidence("just text"), [{ id: "evidence", text: "just text" }]);
+  assert.deepEqual(normalizeEvidence({ text: "single" }), [{ id: "evidence0", text: "single" }]);
+  const multi = normalizeEvidence([
+    { id: "a", text: "one" },
+    { id: "a", text: "two" },
+  ]);
+  assert.deepEqual(multi.map((e) => e.id), ["a", "a_1"]);
+  assert.equal(hasNonEmptyEvidence(multi), true);
+  assert.equal(hasNonEmptyEvidence([{ id: "x", text: "   \n " }]), false);
+  assert.equal(hasNonEmptyEvidence([]), false);
+});
+
+test("review/gate caps keep real diffs reviewable", () => {
+  assert.ok(MAX_REVIEW_DOC_CHARS >= 50_000, "per-document cap must fit real diffs");
+  assert.ok(MAX_CLAIM_CHARS >= 500 && MAX_CLAIM_CHARS <= 4_000);
+  assert.ok(MAX_GATE_CLAIMS >= 5 && MAX_GATE_CLAIMS <= 40);
 });

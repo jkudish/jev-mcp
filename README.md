@@ -5,7 +5,7 @@
 
 Fast, cheap, typed judgments from TypeSafe's Jev model, as MCP tools.
 
-Give your agent eight judgment tools:
+Give your agent ten judgment tools:
 
 - `jev_verify` checks claims against evidence.
 - `jev_screen` judges content before it enters context.
@@ -15,6 +15,8 @@ Give your agent eight judgment tools:
 - `jev_decide` settles bounded alternatives.
 - `jev_compare` judges how two passages relate.
 - `jev_extract` pulls field values with regex plus judgment.
+- `jev_review` scores a proposed diff before the task is called done.
+- `jev_gate` reviews a patch and verifies completion claims in one call.
 
 Each judgment comes back typed: probabilities, and for most tools a confidence score, in roughly 150 to 500 ms, for a fraction of a cent. The cheap mechanical checks agents otherwise skip, because a frontier model is too slow to run on every page, claim, or candidate list.
 
@@ -28,6 +30,8 @@ What you can use it for (the use cases are endless; these are just examples):
 - Choose between a handful of options with evidence and priorities in view, with an explicit ask-the-user escape hatch when it cannot decide.
 - Reconcile a changelog against its docs, a summary against its source, or catch two pages that disagree about a price or a date.
 - Pull prices, dates, versions, and IDs out of a page or document as verbatim strings the model found but never wrote.
+- Score a proposed diff for correctness, spec match, test gap, and blast radius before your agent declares the task done.
+- Gate a merge or a ship on completion claims: the patch review and every "tests pass" claim checked against the evidence actually supplied.
 
 This is early software. Expect rough edges. Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -387,9 +391,116 @@ Pull structured fields out of a document with your regex and Jev's judgment. You
 - Invalid patterns and regexes that time out (they run in a sandboxed worker with a 1-second deadline, so a pathological pattern cannot hang the server) return `invalid_pattern` with the error instead of failing the whole call.
 - Up to 32 fields per call and 20 candidate matches per field, judged in one request. The document is capped at 50,000 characters, and the candidate match text at 50,000 characters in aggregate.
 
+### jev_review
+
+Score a proposed diff against the request before the task is called done. Jev answers four rubric questions, correctness, spec match, test gap, and blast radius, each 0..2, plus one safe-to-apply probability; the server combines them into a weighted composite and one action: `auto`, `review`, or `escalate`. It judges what you hand it. It never runs tests and never applies the patch.
+
+```jsonc
+// arguments
+{
+  "request": "Our CLI reads a JSON config from stdin. It crashed on empty input. Make it tolerate an empty document and any whitespace-only document, returning our zero-value config instead.",
+  "diff": "--- a/src/parse.ts\n+++ b/src/parse.ts\n@@ def parse(stdin) @@\n-  return JSON.parse(stdin);\n+  const trimmed = stdin.trim();\n+  if (trimmed === \"\") return zeroConfig();\n+  return JSON.parse(trimmed);",
+  "tests": "node --test: 2 passed, 1 failing (parse: invalid JSON still rejects)"
+}
+```
+
+```jsonc
+// live result, abridged
+{
+  "action": "escalate",
+  "composite": 0.756,
+  "safe_to_apply": 0.24,
+  "scores": {
+    "correctness": { "score": 1.51, "confidence": 0.27 },
+    "spec_match":  { "score": 1.65, "confidence": 0.47 },
+    "test_gap":    { "score": 0.80, "confidence": 0.14 },
+    "blast_radius":{ "score": 0.45, "confidence": 0.32 }
+  },
+  "weights":    { "correctness": 0.4, "spec_match": 0.3, "test_gap": 0.15, "blast_radius": 0.15 },
+  "thresholds": { "auto_accept": 0.8, "review_at": 0.5, "composite_floor": 0.7 },
+  "truncated": false,
+  "usage": { "input_tokens": 855, "output_tokens": 79 }
+}
+```
+
+Here the composite clears the floor, but the failing test drags `safe_to_apply` to 0.24 and rubric confidences sit under `review_at`, so the patch escalates instead of sailing through on its decent scores.
+
+- Rubric scores run 0..2. Higher is better for `correctness` and `spec_match`; higher is worse for `test_gap` and `blast_radius`, and the composite inverts those two before weighting, so a composite of 1.0 means favorable on every rubric.
+- `auto` requires `safe_to_apply` and every rubric confidence at `auto_accept` and the composite at `composite_floor`. Anything below `review_at` escalates; everything in between is `review`. Unknown confidence counts as zero.
+- `request` frames the review; it is not proof of anything. Put real output in `tests`. Every field is treated as evidence to evaluate, never instructions to follow.
+- Each text field is capped at 50,000 characters. Truncated input sets `truncated: true` and can never return `auto`; a malformed answer is `invalid_response`, not a semantic outcome.
+
+<sub>Adapted from [burnigtm/jev-mcp](https://github.com/burnigtm/jev-mcp) (MIT), via [PR #2](https://github.com/jkudish/jev-mcp/pull/2) by rimusz.</sub>
+
+### jev_gate
+
+The completion gate: the same patch review as `jev_review`, plus your completion claims verified against evidence you supply, in one call. Auto only when the review is accepted and every claim is verified at or above `auto_accept`; a confidently contradicted claim escalates. The request and the claims are assertions to check, never proof.
+
+```jsonc
+// arguments
+{
+  "request": "Our CLI reads a JSON config from stdin. It crashed on empty input. Make it tolerate an empty document and any whitespace-only document, returning our zero-value config instead.",
+  "diff": "--- a/src/parse.ts\n+++ b/src/parse.ts\n@@ def parse(stdin) @@\n-  return JSON.parse(stdin);\n+  const trimmed = stdin.trim();\n+  if (trimmed === \"\") return zeroConfig();\n+  return JSON.parse(trimmed);",
+  "claims": [
+    "The empty-input parser test passed.",
+    "Whitespace-only input is also handled.",
+    "The full test suite passes with no failures."
+  ],
+  "evidence": [
+    { "id": "test-log", "text": "node --test output: 2 passed, 1 failing (parse: invalid JSON still rejects)." },
+    { "id": "diff",      "text": "parse.ts: trimmed input; empty string returns zeroConfig(); JSON.parse on the trimmed text otherwise." }
+  ],
+  "tests": "node --test: 2 passed, 1 failing (parse: invalid JSON still rejects)"
+}
+```
+
+```jsonc
+// live result, abridged
+{
+  "action": "escalate",
+  "reason_codes": ["review_escalated", "claims_contradicted"],
+  "review": { "action": "escalate", "composite": 0.816, "safe_to_apply": 0.19 },
+  "verification": {
+    "action": "escalate",
+    "summary": { "verified": 2, "contradicted": 1, "unsupported": 0, "needs_review": 1 },
+    "results": [
+      { "claim": "The empty-input parser test passed.",
+        "verdict": "verified", "confidence": 1, "action": "auto" },
+      // second claim likewise verified at confidence 1
+      { "claim": "The full test suite passes with no failures.",
+        "verdict": "contradicted", "confidence": 1, "action": "escalate" }
+    ]
+  },
+  "truncated": false,
+  "usage": { "input_tokens": 1559, "output_tokens": 201 }
+}
+```
+
+The two true claims verify at full confidence, and the one that matters, "the full test suite passes," is contradicted by the test log at full confidence: exactly the claim a coding agent is most tempted to hand-wave.
+
+- Claims are judged from `evidence` only, not world knowledge, and not the request, diff, or tests fields; if a claim needs a diff excerpt or a test log as support, supply it in `evidence`. Every field is evidence to evaluate, never instructions to follow.
+- `reason_codes` collects why the gate decided as it did: `incomplete_context`, `invalid_response`, `review_escalated`, `review_required`, `claims_contradicted`, `claims_unsupported`, `claim_confidence_low`, `claim_confidence_below_auto_accept`, `accepted`.
+- Up to 16 claims per call. Text fields are capped at 50,000 characters each and claims at 2,000. Malformed answers surface as `invalid_response` and the gate never returns `auto` on one.
+- Use `jev_verify` for claims without a patch review, and `jev_review` for a patch without claims.
+
+<sub>Adapted from [burnigtm/jev-mcp](https://github.com/burnigtm/jev-mcp) (MIT), via [PR #2](https://github.com/jkudish/jev-mcp/pull/2) by rimusz.</sub>
+
+## When to call which tool
+
+- `jev_verify`: one or more claims against evidence you already have.
+- `jev_screen`: fetched or pasted content, before it enters context.
+- `jev_find`: pick the single best candidate from up to 250.
+- `jev_rerank`: score and sort the whole list.
+- `jev_classify`: label many items against your own catalog, in batches.
+- `jev_decide`: choose between a handful of options with priorities in view.
+- `jev_compare`: how two passages relate, overall or per aspect.
+- `jev_extract`: pull field values a regex can find, verbatim.
+- `jev_review`: score a proposed diff before calling the task done.
+- `jev_gate`: that same review plus completion claims checked against evidence.
+
 ## How the answers work
 
-Jev is TypeSafe's System One model: it returns typed answers with calibrated probability distributions, not generated text. A verify call is a Choice over supports / contradicts / says_nothing, so you see the whole distribution, not one label. A screen call is a set of yes/no probabilities. A find call is a Choice over your candidate ids plus an existence check. A rerank call is one yes/no relevance question per candidate. A compare call is a Choice over three relations, repeated independently per aspect. An extract call is a Choice over the candidates your regex already found, so the model picks a value but never writes one. Code maps the answers to verdicts and actions; policy stays with you.
+Jev is TypeSafe's System One model: it returns typed answers with calibrated probability distributions, not generated text. A verify call is a Choice over supports / contradicts / says_nothing, so you see the whole distribution, not one label. A screen call is a set of yes/no probabilities. A find call is a Choice over your candidate ids plus an existence check. A rerank call is one yes/no relevance question per candidate. A compare call is a Choice over three relations, repeated independently per aspect. An extract call is a Choice over the candidates your regex already found, so the model picks a value but never writes one. A review call is four Score rubrics plus one safe-to-apply probability; a gate adds one Choice per completion claim, judged from evidence only. Code maps the answers to verdicts and actions; policy stays with you.
 
 ## Limits and tuning
 
