@@ -498,6 +498,70 @@ The two true claims verify at full confidence, and the one that matters, "the fu
 - `jev_review`: score a proposed diff before calling the task done.
 - `jev_gate`: that same review plus completion claims checked against evidence.
 
+## Combining the tools: task routing
+
+Routing is a good example of combining tools. Before any work starts, you want to know what kind of task this is and which of your workflows should run it. A `jev_classify` call answers the first question, a `jev_decide` call the second.
+
+Everything below is an example, not a feature: the package ships the two calls, and the classes, routes, and rules are yours to define.
+
+First, classify the task on the axes your routing cares about. Risk is a useful one:
+
+```jsonc
+// arguments
+{
+  "purpose": "Decide how to handle an incoming task",
+  "context": "The workspace has a code checkout, a database, and a deploy pipeline.",
+  "items": [
+    { "id": "task", "text": "Add a dark mode toggle to the settings page." }
+  ],
+  "classes": [
+    { "id": "read_only", "description": "Answers without changing anything: reading files, listing records, summarizing." },
+    { "id": "reversible", "description": "Changes state but can be undone: local edits, draft records, a staging deploy." },
+    { "id": "destructive", "description": "Cannot be undone automatically: deleting records, force-pushes, production deploys, payments." }
+  ]
+}
+```
+
+```jsonc
+// live result, abridged
+{
+  "results": [
+    { "id": "task", "classification": "reversible", "margin": 0.94, "confidence": 0.97, "decision": "auto" }
+  ]
+}
+```
+
+Then decide the route, feeding that answer in as evidence. The `requirements` field is where your policy lives; each one is checked per candidate in the same call:
+
+```jsonc
+// arguments
+{
+  "decision": "Which workflow should run this task?",
+  "evidence": "jev_classify labeled the task reversible (confidence 0.97): it edits the checkout but touches no production system. Available workflows: answer, implement, escalate.",
+  "priorities": "Automated runs must stay reversible; destructive tasks always escalate.",
+  "candidates": [
+    { "id": "answer", "description": "Look things up and reply. No writes." },
+    { "id": "implement", "description": "Branch, edit, run tests, open a PR." },
+    { "id": "escalate", "description": "Hand the task to a person." }
+  ],
+  "requirements": ["Never runs an action the classification called destructive."]
+}
+```
+
+```jsonc
+// live result, abridged
+{
+  "recommendation": { "selected": "implement", "escaped": false, "confidence": 0.93,
+                      "probabilities": { "implement": 0.93, "escalate": 0.05, "answer": 0.02, "ask_user": 0 } },
+  "checks": [ { "candidate": "implement", "requirement": 0, "answer": "supported" } ]
+}
+```
+
+- If either call comes back low-confidence or escaped, route to `escalate` (or ask a person) rather than guessing. The escape hatches exist for exactly that.
+- One classify call and one decide call per task. Repeating them on the same inputs buys nothing.
+
+<sub>Pattern credit: [@Garfielk](https://github.com/Garfielk), from the routing discussion in [#5](https://github.com/jkudish/jev-mcp/issues/5).</sub>
+
 ## How the answers work
 
 Jev is TypeSafe's System One model: it returns typed answers with calibrated probability distributions, not generated text. A verify call is a Choice over supports / contradicts / says_nothing, so you see the whole distribution, not one label. A screen call is a set of yes/no probabilities. A find call is a Choice over your candidate ids plus an existence check. A rerank call is one yes/no relevance question per candidate. A compare call is a Choice over three relations, repeated independently per aspect. An extract call is a Choice over the candidates your regex already found, so the model picks a value but never writes one. A review call is four Score rubrics plus one safe-to-apply probability; a gate adds one Choice per completion claim, judged from evidence only. Code maps the answers to verdicts and actions; policy stays with you.
