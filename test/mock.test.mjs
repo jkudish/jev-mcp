@@ -10,6 +10,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const serverPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 
+// undefined omits the answers key; null is sent explicitly.
 // response overrides for non-happy-path cases: status (non-2xx), raw (verbatim
 // body string), usage (null omits the key), and model (echoed field).
 async function withMock(answers, fn, extraEnv = {}, response = {}) {
@@ -28,7 +29,10 @@ async function withMock(answers, fn, extraEnv = {}, response = {}) {
       res.end(typeof response.raw === "string" ? response.raw : JSON.stringify(mockBody));
     });
   });
-  await new Promise((resolve) => http.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve, reject) => {
+    http.once("error", reject);
+    http.listen(0, "127.0.0.1", resolve);
+  });
   const port = http.address().port;
   const client = new Client({ name: "jev-mcp-mock-e2e", version: "0.1.0" });
   const transport = new StdioClientTransport({
@@ -316,6 +320,10 @@ test("compatible provider names JEV_API_BASE_URL alone when only it is missing",
     (port) => compatibleEnv(port, { JEV_API_BASE_URL: "" }),
   );
 });
+function assertWireResult(result, expected) {
+  const block = result.content.find((b) => b.type === "text");
+  assert.equal(block.text, JSON.stringify(expected, null, 2));
+}
 
 function payload(result) {
   const block = result.content?.find((b) => b.type === "text");
@@ -873,3 +881,254 @@ test("jev_gate makes one request, keeps injected directives in state, and frames
     payload(result);
   });
 });
+
+// ── jev_verify / jev_screen / jev_find: missing answers must fail closed ──
+
+const VERIFY_ARGS = { claims: ["The sky is blue."], evidence: "The sky is blue on a clear day." };
+const SCREEN_ARGS = { text: "<html>some page</html>", purpose: "check the homepage for errors" };
+const FIND_ARGS = {
+  query: "how to file taxes",
+  candidates: [
+    { id: "a", text: "IRS filing instructions" },
+    { id: "b", text: "baking bread at home" },
+  ],
+};
+
+test("jev_screen invalid_response when answers are missing instead of defaulting to pass", async () => {
+  await withMock(() => ({}), async (client) => {
+    const result = await client.callTool({ name: "jev_screen", arguments: SCREEN_ARGS });
+    const body = payload(result);
+    assert.equal(body.status, "invalid_response");
+    assert.notEqual(body.recommendation.action, "pass");
+    assert.equal(body.recommendation.action, "review");
+    assert.equal(body.probabilities.injection, null);
+  });
+});
+
+test("jev_screen still passes on complete benign answers", async () => {
+  await withMock(() => ({ injection: { noul: 0.02 }, substance: { noul: 0.9 }, relevance: { noul: 0.9 } }), async (client) => {
+    const result = await client.callTool({ name: "jev_screen", arguments: SCREEN_ARGS });
+    const body = payload(result);
+    assert.equal(body.status, undefined);
+    assert.equal(body.recommendation.action, "pass");
+    assert.equal(body.probabilities.injection, 0.02);
+    assertWireResult(result, {
+      tool: "jev_screen", model: "jev-latest", provider: "typesafe",
+      probabilities: { injection: 0.02, substance: 0.9, relevance: 0.9 },
+      thresholds: { block_at: 0.75, review_at: 0.25 },
+      recommendation: { action: "pass", reason: "no signals above thresholds" },
+      usage: { input_tokens: 10, output_tokens: 10 },
+    });
+  });
+});
+
+test("jev_find invalid_response when exists or best answers are missing", async () => {
+  await withMock(() => ({}), async (client) => {
+    const result = await client.callTool({ name: "jev_find", arguments: FIND_ARGS });
+    const body = payload(result);
+    assert.equal(body.status, "invalid_response");
+    assert.equal(body.exists, null);
+    assert.deepEqual(body.top, []);
+    assert.equal(body.exists_verdict, null);
+  });
+});
+
+test("jev_find still ranks candidates on complete answers", async () => {
+  await withMock(() => ({ best: pick("a", ["a", "b"]), exists: { noul: 0.95 } }), async (client) => {
+    const result = await client.callTool({ name: "jev_find", arguments: FIND_ARGS });
+    const body = payload(result);
+    assert.equal(body.status, undefined);
+    assert.equal(body.top[0].id, "a");
+    assert.equal(body.exists_verdict, "answered");
+    assertWireResult(result, {
+      tool: "jev_find", model: "jev-latest", provider: "typesafe", query: FIND_ARGS.query,
+      exists: 0.95, exists_verdict: "answered",
+      top: [
+        { id: "a", probability: 0.95, text: FIND_ARGS.candidates[0].text },
+        { id: "b", probability: 0.05, text: FIND_ARGS.candidates[1].text },
+      ],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    });
+  });
+});
+
+test("jev_verify marks a claim invalid_response when the relation answer is missing", async () => {
+  await withMock(() => ({}), async (client) => {
+    const result = await client.callTool({ name: "jev_verify", arguments: VERIFY_ARGS });
+    const body = payload(result);
+    assert.equal(body.results[0].status, "invalid_response");
+    assert.equal(body.results[0].verdict, "unknown");
+    assert.equal(body.results[0].action, "review");
+    assert.equal(body.summary.needs_review, 1);
+  });
+});
+
+test("jev_verify still returns verified verdicts on a complete response", async () => {
+  await withMock(() => ({ relation_claim0: pick("supports", ["supports", "contradicts", "says_nothing"]) }), async (client) => {
+    const result = await client.callTool({ name: "jev_verify", arguments: VERIFY_ARGS });
+    const body = payload(result);
+    assert.equal(body.results[0].status, undefined);
+    assert.equal(body.results[0].verdict, "verified");
+    assert.equal(body.summary.verified, 1);
+    assertWireResult(result, {
+      tool: "jev_verify", model: "jev-latest", provider: "typesafe", auto_accept: 0.8,
+      summary: { verified: 1, contradicted: 0, unsupported: 0, needs_review: 0 },
+      results: [{
+        id: "claim0", claim: VERIFY_ARGS.claims[0], verdict: "verified",
+        probabilities: { supports: 0.95, contradicts: 0.025, says_nothing: 0.025 },
+        confidence: 0.99, action: "auto", supporting_evidence: null,
+      }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    });
+  });
+});
+
+const RELATION_KEYS = ["supports", "contradicts", "says_nothing"];
+const BENIGN_SCREEN = { injection: { noul: 0.02 }, substance: { noul: 0.9 }, relevance: { noul: 0.9 } };
+const VALID_FIND = { best: pick("a", ["a", "b"]), exists: { noul: 0.95 } };
+
+async function checkAnswer(name, args, answers, check) {
+  await withMock(answers, async (client) => {
+    const result = await client.callTool({ name, arguments: args });
+    assert.notEqual(result.isError, true);
+    check(payload(result));
+  });
+}
+
+function invalidScreen(body) {
+  assert.equal(body.status, "invalid_response");
+  assert.equal(body.recommendation.action, "review");
+}
+function invalidFind(body) {
+  assert.equal(body.status, "invalid_response");
+  assert.equal(body.exists_verdict, null);
+  assert.deepEqual(body.top, []);
+}
+function invalidClaim(result) {
+  assert.equal(result.status, "invalid_response");
+  assert.equal(result.verdict, "unknown");
+  assert.equal(result.action, "review");
+  assert.equal(result.confidence, null);
+  assert.equal(result.probabilities, null);
+  assert.equal(result.supporting_evidence, null);
+}
+
+for (const purpose of [undefined, "check the homepage for errors"]) {
+  for (const key of purpose ? ["injection", "substance", "relevance"] : ["injection", "substance"]) {
+    for (const noul of [undefined, null, "0.1", -0.1, 1.1, true]) {
+      test(`jev_screen rejects ${key}=${String(noul)} with purpose=${String(purpose)}`, async () => {
+        const answers = { ...BENIGN_SCREEN, [key]: noul === undefined ? undefined : { noul } };
+        await checkAnswer("jev_screen", { text: SCREEN_ARGS.text, purpose }, answers, (body) => {
+          invalidScreen(body);
+          assert.equal(body.probabilities[key], null);
+        });
+      });
+    }
+  }
+}
+
+test("jev_screen accepts zero probabilities and does not require unrequested relevance", async () => {
+  for (const purpose of [undefined, "", SCREEN_ARGS.purpose]) {
+    await checkAnswer("jev_screen", { text: SCREEN_ARGS.text, purpose }, {
+      injection: { noul: 0 }, substance: { noul: 1 }, ...(purpose ? { relevance: { noul: 1 } } : {}),
+    }, (body) => {
+      assert.equal(body.status, undefined);
+      assert.equal(body.recommendation.action, "pass");
+      assert.equal(body.probabilities.injection, 0);
+    });
+  }
+  for (const key of ["substance", "relevance"]) {
+    await checkAnswer("jev_screen", SCREEN_ARGS, { ...BENIGN_SCREEN, [key]: { noul: 0 } }, (body) => {
+      assert.equal(body.status, undefined);
+      assert.equal(body.recommendation.action, "skip");
+      assert.equal(body.probabilities[key], 0);
+    });
+  }
+});
+
+const BAD_BEST = [
+  undefined, null, true, "bad", [], {}, { choice: "a" },
+  ...[{}, { alien: 1 }, { a: 1 }, { a: 1, b: 0, alien: 0 },
+    { a: null, b: 1 }, { a: "0.9", b: 0.1 }, { a: 1.1, b: -0.1 },
+    { a: 0.8, b: 0.8 }, { a: 0, b: 1 }, [], "bad", 1].map((probabilities) => ({ choice: "a", probabilities })),
+  { choice: 1, probabilities: { a: 1, b: 0 } },
+  { choice: "alien", probabilities: { a: 1, b: 0 } },
+];
+for (const [i, best] of BAD_BEST.entries()) {
+  test(`jev_find rejects malformed best case ${i}`, async () => {
+    await checkAnswer("jev_find", FIND_ARGS, { ...VALID_FIND, best }, invalidFind);
+  });
+}
+for (const noul of [undefined, null, "0", -1, 2, false]) {
+  test(`jev_find rejects exists=${String(noul)}`, async () => {
+    await checkAnswer("jev_find", FIND_ARGS, { ...VALID_FIND, exists: noul === undefined ? undefined : { noul } }, (body) => {
+      invalidFind(body);
+      assert.equal(body.exists, null);
+    });
+  });
+}
+test("jev_find accepts exists=0 as absent and tied maximum choices", async () => {
+  await checkAnswer("jev_find", FIND_ARGS, {
+    exists: { noul: 0 }, best: { choice: "b", probabilities: { a: 0.5, b: 0.5 } },
+  }, (body) => {
+    assert.equal(body.status, undefined);
+    assert.equal(body.exists_verdict, "absent");
+    assert.deepEqual(body.top.map((c) => c.id), ["a", "b"]);
+  });
+});
+
+const BAD_RELATIONS = [
+  undefined, null, true, "bad", [], {},
+  ...["toString", "__proto__", "constructor", 0, true, {}, ["supports"]].map((choice) => ({ ...pick("supports", RELATION_KEYS), choice })),
+  ...[undefined, null, {}, [], "bad", 1, { supports: 1 },
+    { supports: 1, contradicts: 0, says_nothing: 0, alien: 0 },
+    { supports: "0.9", contradicts: 0.1, says_nothing: 0 },
+    { supports: null, contradicts: 1, says_nothing: 0 },
+    { supports: 1.2, contradicts: -0.2, says_nothing: 0 },
+    { supports: 0.9, contradicts: 0.9, says_nothing: 0 },
+    { supports: 0.1, contradicts: 0.9, says_nothing: 0 },
+  ].map((probabilities) => ({ choice: "supports", confidence: 0.99, probabilities })),
+  ...["0.99", 2, -1, true, {}, []].map((confidence) => ({ ...pick("supports", RELATION_KEYS), confidence })),
+];
+for (const [i, relation] of BAD_RELATIONS.entries()) {
+  test(`jev_verify rejects malformed relation case ${i} without affecting other claims`, async () => {
+    await checkAnswer("jev_verify", { ...VERIFY_ARGS, claims: ["Valid claim", "Invalid claim"] }, {
+      relation_claim0: pick("supports", RELATION_KEYS), relation_claim1: relation,
+    }, (body) => {
+      assert.equal(body.results[0].verdict, "verified");
+      assert.equal(body.results[0].action, "auto");
+      invalidClaim(body.results[1]);
+      assert.deepEqual(body.summary, { verified: 1, contradicted: 0, unsupported: 0, needs_review: 1 });
+    });
+  });
+}
+for (const confidence of [undefined, null, 0]) {
+  test(`jev_verify preserves valid relation with confidence=${String(confidence)}`, async () => {
+    for (const auto_accept of [0, 0.8]) {
+      await checkAnswer("jev_verify", { ...VERIFY_ARGS, auto_accept }, {
+        relation_claim0: { ...pick("supports", RELATION_KEYS), confidence },
+      }, (body) => {
+        const result = body.results[0];
+        assert.equal(result.status, undefined);
+        assert.equal(result.verdict, "verified");
+        assert.equal(result.confidence, confidence ?? null);
+        assert.equal(result.action, confidence === 0 && auto_accept === 0 ? "auto" : "review");
+      });
+    }
+  });
+}
+test("jev_verify accepts tied argmax and optional missing source answers for multiple evidence", async () => {
+  await checkAnswer("jev_verify", { ...VERIFY_ARGS, evidence: [{ id: "a", text: "A" }, { id: "b", text: "B" }] }, {
+    relation_claim0: { choice: "supports", confidence: 1, probabilities: { supports: 0.5, contradicts: 0.5, says_nothing: 0 } },
+  }, (body) => {
+    assert.equal(body.results[0].verdict, "verified");
+    assert.equal(body.results[0].supporting_evidence, null);
+  });
+});
+for (const answers of [undefined, null, [], "bad", 0, true]) {
+  test(`all three tools fail closed for answers=${JSON.stringify(answers)}`, async () => {
+    await checkAnswer("jev_screen", SCREEN_ARGS, answers, invalidScreen);
+    await checkAnswer("jev_find", FIND_ARGS, answers, invalidFind);
+    await checkAnswer("jev_verify", VERIFY_ARGS, answers, (body) => invalidClaim(body.results[0]));
+  });
+}
