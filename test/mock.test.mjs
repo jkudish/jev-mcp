@@ -55,6 +55,99 @@ function pick(choiceKey, keys) {
   return { choice: choiceKey, confidence: 0.99, probabilities };
 }
 
+// jev_classify: independent item validation and unchanged valid output.
+const CLASSIFY_ARGS = {
+  items: [{ id: "message", text: "I was charged twice." }],
+  classes: [
+    { id: "billing", description: "Payments and refunds" },
+    { id: "sales", description: "Pricing and discounts" },
+    { id: "technical", description: "Technical support" },
+  ],
+};
+const CLASSIFY_KEYS = ["c0", "c1", "c2"];
+const INVALID_CLASSIFICATION = {
+  id: "message",
+  status: "invalid_response",
+  classification: null,
+  probabilities: null,
+  confidence: null,
+  margin: null,
+  decision: "review",
+};
+
+test("jev_classify preserves valid argmax outputs and auto/review decisions", async () => {
+  await withMock(() => ({
+    i0: pick("c0", CLASSIFY_KEYS),
+    i1: { choice: "c1", confidence: 0.7, probabilities: { c0: 0.25, c1: 0.5, c2: 0.25 } },
+  }), async (client, requests) => {
+    const body = payload(await client.callTool({ name: "jev_classify", arguments: {
+      ...CLASSIFY_ARGS,
+      items: [...CLASSIFY_ARGS.items, { id: "question", text: "Do you offer discounts?" }],
+    } }));
+    assert.deepEqual(Object.keys(requests[0].body.questions), ["i0", "i1"]);
+    assert.deepEqual(body.results, [
+      { id: "message", classification: "billing", probabilities: { billing: 0.95, sales: 0.025, technical: 0.025 }, confidence: 0.99, margin: 0.95 - 0.025, top_probability: 0.95, decision: "auto" },
+      { id: "question", classification: "sales", probabilities: { billing: 0.25, sales: 0.5, technical: 0.25 }, confidence: 0.7, margin: 0.25, top_probability: 0.5, decision: "review" },
+    ]);
+    assert.deepEqual(body.summary, { items: 2, auto: 1, review: 1, invalid_response: 0, by_class: { billing: 1, sales: 1 } });
+  });
+});
+
+test("jev_classify rejects a choice that is not the argmax", async () => {
+  await withMock(() => ({
+    i0: { choice: "c1", probabilities: { c0: 0.9, c1: 0.05, c2: 0.05 } },
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_classify", arguments: CLASSIFY_ARGS }));
+    assert.deepEqual(body.results, [INVALID_CLASSIFICATION]);
+    assert.deepEqual(body.summary, { items: 1, auto: 0, review: 0, invalid_response: 1, by_class: {} });
+  });
+});
+
+test("jev_classify accepts either tied maximum", async () => {
+  await withMock(() => ({
+    i0: { choice: "c0", probabilities: { c0: 0.5, c1: 0.5, c2: 0 } },
+    i1: { choice: "c1", probabilities: { c0: 0.5, c1: 0.5, c2: 0 } },
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_classify", arguments: {
+      ...CLASSIFY_ARGS, items: [CLASSIFY_ARGS.items[0], { id: "other", text: "Pricing question" }],
+    } }));
+    assert.deepEqual(body.results.map((r) => [r.classification, r.status, r.margin, r.top_probability, r.decision]), [
+      ["billing", undefined, 0, 0.5, "review"],
+      ["sales", undefined, 0, 0.5, "review"],
+    ]);
+    assert.equal(body.summary.invalid_response, 0);
+  });
+});
+
+test("jev_classify handles invalid and valid items independently", async () => {
+  await withMock(() => ({
+    i0: { choice: "c1", probabilities: { c0: 0.9, c1: 0.05, c2: 0.05 } },
+    i1: pick("c2", CLASSIFY_KEYS),
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_classify", arguments: {
+      ...CLASSIFY_ARGS, items: [CLASSIFY_ARGS.items[0], { id: "bug", text: "The app crashes." }],
+    } }));
+    assert.deepEqual(body.results, [INVALID_CLASSIFICATION,
+      { id: "bug", classification: "technical", probabilities: { billing: 0.025, sales: 0.025, technical: 0.95 }, confidence: 0.99, margin: 0.95 - 0.025, top_probability: 0.95, decision: "auto" },
+    ]);
+    assert.deepEqual(body.summary, { items: 2, auto: 1, review: 0, invalid_response: 1, by_class: { technical: 1 } });
+  });
+});
+
+test("jev_classify applies the 1e-9 argmax tolerance", async () => {
+  await withMock(() => ({
+    i0: { choice: "c1", probabilities: { c0: 0.5, c1: 0.5 - 5e-10, c2: 5e-10 } },
+    i1: { choice: "c1", probabilities: { c0: 0.5, c1: 0.5 - 2e-9, c2: 2e-9 } },
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_classify", arguments: {
+      ...CLASSIFY_ARGS, items: [CLASSIFY_ARGS.items[0], { id: "outside", text: "Another question" }],
+    } }));
+    assert.equal(body.results[0].classification, "sales");
+    assert.equal(body.results[0].status, undefined);
+    assert.deepEqual(body.results[1], { ...INVALID_CLASSIFICATION, id: "outside" });
+  });
+});
+
 const VERSIONS = Array.from({ length: 25 }, (_, i) => `1.0.${i}`).join(" ");
 const EXTRACT_ARGS = {
   document: `Changelog: ${VERSIONS}`,
