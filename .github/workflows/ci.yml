@@ -19,7 +19,6 @@ jobs:
       - run: npm test
       # Live end-to-end tests run only when a TYPESAFE_API_KEY secret is configured.
       - name: End-to-end (optional)
-        if: env.TYPESAFE_API_KEY != ''
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: npm run test:e2e
