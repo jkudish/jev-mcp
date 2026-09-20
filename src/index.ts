@@ -176,18 +176,39 @@ server.registerTool(
       evidence,
     };
 
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
+    const answers = isAnswerRecord(rawAnswers) ? rawAnswers : {};
 
     const results = claimItems.map((claim) => {
       const relation = answers[`relation_${claim.id}`];
+      // source_* is optional auxiliary information, requested only for multiple
+      // evidence items. Its absence does not invalidate the relation verdict.
       const source = answers[`source_${claim.id}`];
-      const confidence = relation?.confidence ?? null;
-      const verdict = RELATION_TO_VERDICT[relation?.choice] ?? "unknown";
+      const validated = validateChoiceAnswer(relation, Object.keys(RELATION_TO_VERDICT));
+      const valid = validated && Object.hasOwn(RELATION_TO_VERDICT, validated.choice) &&
+        (relation.confidence == null || validated.confidence !== null);
+      const confidence = valid ? validated.confidence : null;
+      if (!valid) {
+        // A missing or malformed relation must not masquerade as an unsupported
+        // claim: surface it as invalid so callers can tell protocol failure
+        // apart from a real verdict.
+        return {
+          id: claim.id,
+          claim: claim.text,
+          verdict: "unknown",
+          probabilities: null,
+          confidence: null,
+          status: "invalid_response" as const,
+          action: "review" as const,
+          supporting_evidence: null,
+        };
+      }
+      const verdict = RELATION_TO_VERDICT[relation.choice];
       return {
         id: claim.id,
         claim: claim.text,
         verdict,
-        probabilities: relation?.probabilities ?? null,
+        probabilities: relation.probabilities ?? null,
         confidence,
         action: confidence === null ? "review" : verifyAction(confidence, autoAccept),
         supporting_evidence: source?.choice && source.choice !== "none" ? source.choice : null,
@@ -258,13 +279,28 @@ server.registerTool(
     }
 
     const state = { content, purpose: purpose ?? null };
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
+    const answers = isAnswerRecord(rawAnswers) ? rawAnswers : {};
 
-    const injection = answers.injection?.noul ?? 0;
-    const substance = answers.substance?.noul ?? undefined;
-    const relevance = purpose ? (answers.relevance?.noul ?? undefined) : undefined;
+    const injection = validateNoulAnswer(answers.injection);
+    const substance = validateNoulAnswer(answers.substance);
+    const relevance = purpose ? validateNoulAnswer(answers.relevance) : undefined;
+    if (injection === null || substance === null || (purpose && relevance === null)) {
+      // A screening tool must fail closed: a missing or malformed answer must
+      // not be treated as a clean bill of health (injection ?? 0 would pass).
+      return text({
+        tool: "jev_screen",
+        model: model,
+        provider,
+        status: "invalid_response",
+        probabilities: { injection: injection ?? null, substance: substance ?? null, relevance: relevance ?? null },
+        thresholds: { block_at: blockAt, review_at: reviewAt },
+        recommendation: { action: "review", reason: "missing or malformed answers; cannot screen safely" },
+        usage,
+      });
+    }
 
-    const recommendation = screenRecommendation({ injection, relevance, substance, blockAt, reviewAt });
+    const recommendation = screenRecommendation({ injection, relevance: relevance ?? undefined, substance, blockAt, reviewAt });
 
     return text({
       tool: "jev_screen",
@@ -314,11 +350,28 @@ server.registerTool(
     };
 
     const state = { query, candidates };
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
+    const answers = isAnswerRecord(rawAnswers) ? rawAnswers : {};
 
-    const probabilities = answers.best?.probabilities ?? {};
-    const ranked = rankCandidates(candidates, probabilities).slice(0, topK);
-    const exists = answers.exists?.noul ?? 0;
+    const exists = validateNoulAnswer(answers.exists);
+    const best = validateChoiceAnswer(answers.best, candidates.map((c) => c.id));
+    if (exists === null || best === null) {
+      // A missing exists/best answer must not be read as "no match" (exists ?? 0)
+      // or "no ranking": surface the protocol failure instead.
+      return text({
+        tool: "jev_find",
+        model: model,
+        provider,
+        query,
+        status: "invalid_response",
+        exists: exists ?? null,
+        exists_verdict: null,
+        top: [],
+        reason: "missing or malformed best or exists answer; cannot rank safely",
+        usage,
+      });
+    }
+    const ranked = rankCandidates(candidates, best.probabilities).slice(0, topK);
 
     return text({
       tool: "jev_find",
@@ -1161,6 +1214,35 @@ function validateScoreAnswer(answer: unknown): { score: number; confidence: numb
       ? a.confidence
       : null;
   return { score: a.score, confidence };
+}
+
+// API objects must be records, not null, arrays, or primitive values.
+function isAnswerRecord(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// Choice contract: exact candidate keys, finite [0,1] probabilities summing
+// to one (classify tolerance), and a choice tied for the maximum probability.
+function validateChoiceAnswer(answer: unknown, expectedKeys: string[]): {
+  choice: string; probabilities: Record<string, number>; confidence: number | null;
+} | null {
+  if (!isAnswerRecord(answer) || typeof answer.choice !== "string" || !isAnswerRecord(answer.probabilities)) return null;
+  const expected = new Set(expectedKeys);
+  const probabilities: Record<string, number> = answer.probabilities;
+  const keys = Object.keys(probabilities);
+  const values = Object.values(probabilities);
+  if (
+    !expected.has(answer.choice) || keys.length !== expected.size ||
+    !keys.every((key) => expected.has(key)) ||
+    !values.every((p) => typeof p === "number" && Number.isFinite(p) && p >= 0 && p <= 1) ||
+    Math.abs(values.reduce((a, b) => a + b, 0) - 1) > 0.01 ||
+    probabilities[answer.choice] < Math.max(...values) - 1e-9
+  ) return null;
+  const confidence =
+    typeof answer.confidence === "number" && Number.isFinite(answer.confidence) && answer.confidence >= 0 && answer.confidence <= 1
+      ? answer.confidence
+      : null;
+  return { choice: answer.choice, probabilities, confidence };
 }
 
 // Noul contract: a finite probability in [0,1].
