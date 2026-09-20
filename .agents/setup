@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Amp orb setup for jev-mcp, the primary repository of the Amp "Jev" project.
+#
+# In project orbs the additional repository (jev-browser) is checked out under
+# ../repos/jev-browser; this script installs and builds both. When jev-mcp is
+# cloned standalone (no sibling jev-browser checkout), the browser repo is
+# skipped and only jev-mcp is prepared.
+#
+# The script is idempotent: safe to run repeatedly; warm runs converge fast.
+set -euo pipefail
+
+log() { printf '[jev setup %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+# Locate the jev-browser checkout (Amp multi-repo projects use ../repos/).
+browser=""
+for candidate in "$root/../repos/jev-browser" "$root/../jev-browser"; do
+  if [ -f "$candidate/package.json" ]; then
+    browser="$(cd "$candidate" && pwd)"
+    break
+  fi
+done
+
+# Both packages require Node >= 20.
+node_version="$(node --version 2>/dev/null || true)"
+node_major="$(printf '%s' "$node_version" | sed 's/^v\([0-9]*\).*/\1/')"
+if [ "${node_major:-0}" -lt 20 ]; then
+  log "ERROR: Node >= 20 required, found: ${node_version:-none}"
+  exit 1
+fi
+
+log "installing jev-mcp dependencies"
+npm ci --no-fund --no-audit
+
+log "building jev-mcp"
+npm run build
+
+if [ -n "$browser" ]; then
+  log "installing jev-browser dependencies at $browser (first run downloads Chromium)"
+  (cd "$browser" && npm ci --no-fund --no-audit)
+  log "building jev-browser"
+  (cd "$browser" && npm run build)
+else
+  log "no jev-browser checkout found; skipped (standalone jev-mcp setup)"
+fi
+
+log "done"
