@@ -1,12 +1,12 @@
-// Jev transport: TypeSafe direct (default), OpenRouter Decisions, or
-// Cloudflare Workers AI. All speak the {state, questions} / answers contract;
-// URL, auth, and model slugs differ. Proxies add hops, so direct TypeSafe
-// remains the recommended default.
+// Jev transport: TypeSafe direct (default), OpenRouter Decisions, Cloudflare
+// Workers AI, or a caller-supplied Jev-compatible System One endpoint. All
+// speak the {state, questions} / answers contract; URL, auth, and model slugs
+// differ. Proxies add hops, so direct TypeSafe remains the recommended default.
 
 import { experimental_evaluate } from "ai";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 
-export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel";
+export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible";
 
 export interface AskResult {
   answers: Record<string, any>;
@@ -26,6 +26,7 @@ function resolve(env: NodeJS.ProcessEnv): JevProvider {
   const hasOpenRouter = /^sk-or-/.test(env.OPENROUTER_API_KEY ?? "");
   const cfToken = env.JEV_CLOUDFLARE_API_TOKEN || env.CLOUDFLARE_API_TOKEN;
   const hasCloudflare = Boolean(cfToken && env.CLOUDFLARE_ACCOUNT_ID);
+  const hasCompatible = Boolean(env.JEV_API_KEY && env.JEV_API_BASE_URL);
 
   if (explicit === "typesafe") {
     if (!hasTypesafe) throw new Error("JEV_PROVIDER=typesafe but TYPESAFE_API_KEY is not set.");
@@ -43,12 +44,18 @@ function resolve(env: NodeJS.ProcessEnv): JevProvider {
     if (!hasCloudflare) throw new Error("JEV_PROVIDER=cloudflare but a Cloudflare API token (CLOUDFLARE_API_TOKEN or JEV_CLOUDFLARE_API_TOKEN) and CLOUDFLARE_ACCOUNT_ID are not both set.");
     return "cloudflare";
   }
+  if (explicit === "compatible") {
+    if (!env.JEV_API_KEY) throw new Error("JEV_PROVIDER=compatible but JEV_API_KEY is not set.");
+    if (!env.JEV_API_BASE_URL) throw new Error("JEV_PROVIDER=compatible but JEV_API_BASE_URL is not set.");
+    return "compatible";
+  }
   if (hasTypesafe) return "typesafe";
   if (hasOpenRouter) return "openrouter";
   if (hasCloudflare) return "cloudflare";
   if (env.AI_GATEWAY_API_KEY) return "vercel";
+  if (hasCompatible) return "compatible";
   throw new Error(
-    "No TYPESAFE_API_KEY, OPENROUTER_API_KEY (sk-or-), or Cloudflare token + CLOUDFLARE_ACCOUNT_ID found. Set one, or JEV_PROVIDER to choose explicitly.",
+    "No Jev provider credentials found. Set TYPESAFE_API_KEY, OPENROUTER_API_KEY (sk-or-), Cloudflare token + CLOUDFLARE_ACCOUNT_ID, AI_GATEWAY_API_KEY, or JEV_API_KEY + JEV_API_BASE_URL; set JEV_PROVIDER to choose explicitly.",
   );
 }
 
@@ -107,6 +114,32 @@ export async function askJev(
       usage: { input_tokens: body.usage?.input_tokens ?? 0, output_tokens: body.usage?.output_tokens ?? 0 },
       provider,
       model: slug,
+    };
+  }
+
+  if (provider === "compatible") {
+    const response = await fetch(process.env.JEV_API_BASE_URL!, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.JEV_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model, state, questions }),
+      signal,
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`Jev-compatible endpoint ${response.status}: ${body.slice(0, 200)}`);
+    }
+    const body = await response.json().catch(() => null);
+    if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object") {
+      throw new Error("Jev-compatible endpoint returned an invalid response: expected an answers object.");
+    }
+    return {
+      answers: body.answers,
+      usage: { input_tokens: body.usage?.input_tokens ?? 0, output_tokens: body.usage?.output_tokens ?? 0 },
+      provider,
+      model: body.model ?? model,
     };
   }
 
