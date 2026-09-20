@@ -10,15 +10,22 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const serverPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 
-async function withMock(answers, fn) {
+// response overrides for non-happy-path cases: status (non-2xx), raw (verbatim
+// body string), usage (null omits the key), and model (echoed field).
+async function withMock(answers, fn, extraEnv = {}, response = {}) {
   const requests = [];
   const http = createServer((req, res) => {
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", () => {
-      requests.push({ path: req.url, body: JSON.parse(raw) });
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ answers: typeof answers === "function" ? answers(JSON.parse(raw)) : answers, usage: { input_tokens: 10, output_tokens: 10 } }));
+      requests.push({ method: req.method, path: req.url, headers: req.headers, body: JSON.parse(raw) });
+      const mockBody = {
+        answers: typeof answers === "function" ? answers(JSON.parse(raw)) : answers,
+      };
+      if (response.usage !== null) mockBody.usage = response.usage ?? { input_tokens: 10, output_tokens: 10 };
+      if (response.model !== undefined) mockBody.model = response.model;
+      res.writeHead(response.status ?? 200, { "Content-Type": "application/json" });
+      res.end(typeof response.raw === "string" ? response.raw : JSON.stringify(mockBody));
     });
   });
   await new Promise((resolve) => http.listen(0, "127.0.0.1", resolve));
@@ -30,6 +37,7 @@ async function withMock(answers, fn) {
     env: {
       TYPESAFE_API_KEY: "test-key",
       TYPESAFE_BASE_URL: `http://127.0.0.1:${port}`,
+      ...(typeof extraEnv === "function" ? extraEnv(port) : extraEnv),
     },
   });
   await client.connect(transport);
@@ -40,6 +48,274 @@ async function withMock(answers, fn) {
     http.close();
   }
 }
+
+const compatibleEnv = (port, overrides = {}) => ({
+  JEV_PROVIDER: "compatible",
+  JEV_API_KEY: "compatible-test-key",
+  JEV_API_BASE_URL: `http://127.0.0.1:${port}/v1/systemone`,
+  ...overrides,
+});
+
+test("compatible provider sends the standard request to the configured endpoint", async () => {
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      const body = payload(result);
+      assert.equal(body.tool, "jev_verify");
+      assert.equal(body.provider, "compatible");
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].method, "POST");
+      assert.equal(requests[0].path, "/v1/systemone");
+      assert.equal(requests[0].headers.authorization, "Bearer compatible-test-key");
+      assert.match(requests[0].headers["content-type"], /^application\/json/);
+      assert.equal(requests[0].body.model, "compatible-model");
+      assert.deepEqual(requests[0].body.state.claims, [{ text: "The patch is ready", id: "claim0" }]);
+      assert.deepEqual(requests[0].body.state.evidence, [{ id: "evidence", text: "The tests pass" }]);
+      assert.deepEqual(requests[0].body.questions.relation_claim0.criteria, {
+        supports: "The evidence states the claim or directly implies that it is true",
+        contradicts: "The evidence states the opposite of the claim or implies that it is false",
+        says_nothing: "The evidence does not address what the claim asserts, either way",
+      });
+    },
+    (port) => compatibleEnv(port, { JEV_MCP_MODEL: "compatible-model" }),
+    { model: "compatible-model" },
+  );
+});
+
+test("compatible provider parses verdicts and reports the endpoint usage and default model", async () => {
+  // JEV_MCP_MODEL is unset: the global jev-latest default must reach the wire,
+  // and the usage echoed by the endpoint must reach the tool result verbatim.
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      const body = payload(result);
+      assert.equal(body.results[0].verdict, "verified");
+      assert.equal(body.results[0].action, "auto");
+      assert.equal(body.summary.verified, 1);
+      assert.deepEqual(body.usage, { input_tokens: 42, output_tokens: 7 });
+      assert.equal(body.model, "jev-latest");
+      assert.equal(requests[0].body.model, "jev-latest");
+    },
+    compatibleEnv,
+    { usage: { input_tokens: 42, output_tokens: 7 } },
+  );
+});
+
+test("compatible provider auto-selects when it is the only configured provider", async () => {
+  await withMock(
+    (request) => ({ relation_claim0: pick("says_nothing", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      const body = payload(result);
+      assert.equal(body.provider, "compatible");
+      assert.equal(body.results[0].verdict, "unsupported");
+    },
+    (port) =>
+      compatibleEnv(port, {
+        JEV_PROVIDER: "",
+        TYPESAFE_API_KEY: "",
+        TYPESAFE_BASE_URL: "",
+      }),
+  );
+});
+
+test("compatible provider rejects a malformed response", async () => {
+  await withMock(
+    null,
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /invalid response/i);
+    },
+    compatibleEnv,
+  );
+});
+
+test("compatible provider reports non-2xx status with the body redacted", async () => {
+  // The 401 body echoes the Authorization header; the key must not survive
+  // into the MCP-visible error, while the status and harmless text remain.
+  await withMock(
+    {},
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /401/);
+      assert.match(result.content[0].text, /Unauthorized client/);
+      assert.ok(!result.content[0].text.includes("compatible-test-key"));
+    },
+    compatibleEnv,
+    { status: 401, raw: JSON.stringify({ error: "Unauthorized client for Bearer compatible-test-key (compatible-test-key)" }) },
+  );
+});
+
+test("compatible provider rejects empty or array answers", async () => {
+  for (const answers of [{}, []]) {
+    await withMock(
+      answers,
+      async (client) => {
+        const result = await client.callTool({
+          name: "jev_verify",
+          arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+        });
+        assert.equal(result.isError, true);
+        assert.match(result.content[0].text, /invalid response/i);
+      },
+      compatibleEnv,
+    );
+  }
+});
+
+test("compatible provider rejects an answer missing for a requested question", async () => {
+  // jev_screen defaults a missing injection answer to zero, which would pass
+  // the screen; the transport must reject the response before that happens.
+  await withMock(
+    () => ({ substance: { noul: 0.9 } }),
+    async (client) => {
+      const result = await client.callTool({ name: "jev_screen", arguments: { text: "Release notes for v1.2.3" } });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /no answer for question "injection"/);
+    },
+    compatibleEnv,
+  );
+});
+
+test("compatible provider rejects answers malformed for their question type", async () => {
+  const cases = [
+    // Choice off its question's catalog.
+    {
+      answers: () => ({ relation_claim0: { choice: "definitely", confidence: 0.99, probabilities: { definitely: 1 } } }),
+      tool: "jev_verify",
+      arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      message: /must choose one of its question's criteria/,
+    },
+    // Noul probability above one.
+    {
+      answers: () => ({ injection: { noul: 1.5 }, substance: { noul: 0.9 } }),
+      tool: "jev_screen",
+      arguments: { text: "Release notes for v1.2.3" },
+      message: /finite noul probability in \[0,1\]/,
+    },
+    // Score beyond its three-level rubric.
+    {
+      answers: () => ({ ...STRONG_REVIEW, correctness: { score: 2.5, confidence: 0.9 }, safe_to_apply: { noul: 0.95 } }),
+      tool: "jev_review",
+      arguments: REVIEW_ARGS,
+      message: /finite score within its rubric/,
+    },
+    // Non-string model field.
+    {
+      answers: () => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }),
+      tool: "jev_review",
+      arguments: REVIEW_ARGS,
+      message: /model must be absent or a string/,
+      model: 123,
+    },
+  ];
+  for (const { answers, tool, arguments: args, message, model } of cases) {
+    await withMock(
+      answers,
+      async (client) => {
+        const result = await client.callTool({ name: tool, arguments: args });
+        assert.equal(result.isError, true);
+        assert.match(result.content[0].text, message);
+      },
+      compatibleEnv,
+      model !== undefined ? { model } : {},
+    );
+  }
+});
+
+test("compatible provider rejects malformed or incomplete usage", async () => {
+  const cases = [
+    { input_tokens: 10 }, // output_tokens missing
+    { input_tokens: "10", output_tokens: 5 }, // non-numeric
+    { input_tokens: -1, output_tokens: 5 }, // negative
+    [], // not an object
+  ];
+  for (const usage of cases) {
+    await withMock(
+      (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+      async (client) => {
+        const result = await client.callTool({
+          name: "jev_verify",
+          arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+        });
+        assert.equal(result.isError, true);
+        assert.match(result.content[0].text, /usage must report finite non-negative input_tokens and output_tokens/);
+      },
+      compatibleEnv,
+      { usage },
+    );
+  }
+});
+
+test("compatible provider tolerates an absent usage block and reports zeros", async () => {
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      const body = payload(result);
+      assert.equal(body.results[0].verdict, "verified");
+      assert.deepEqual(body.usage, { input_tokens: 0, output_tokens: 0 });
+    },
+    compatibleEnv,
+    { usage: null },
+  );
+});
+
+test("compatible provider reports missing configuration before making a request", async () => {
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /JEV_API_KEY and JEV_API_BASE_URL are not set/);
+      assert.match(result.content[0].text, /JEV_MCP_MODEL is optional/);
+      assert.equal(requests.length, 0);
+    },
+    { JEV_PROVIDER: "compatible", JEV_API_KEY: "", JEV_API_BASE_URL: "" },
+  );
+});
+
+test("compatible provider names JEV_API_BASE_URL alone when only it is missing", async () => {
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /JEV_API_BASE_URL is not set/);
+      assert.ok(!result.content[0].text.includes("JEV_API_KEY and"));
+      assert.equal(requests.length, 0);
+    },
+    (port) => compatibleEnv(port, { JEV_API_BASE_URL: "" }),
+  );
+});
 
 function payload(result) {
   const block = result.content?.find((b) => b.type === "text");

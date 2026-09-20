@@ -580,9 +580,10 @@ Jev is TypeSafe's System One model: it returns typed answers with calibrated pro
 | `OPENROUTER_API_KEY` | none | OpenRouter `sk-or-` key; used when `TYPESAFE_API_KEY` is absent. |
 | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | none | Cloudflare Workers AI; used when no other provider key is present. `JEV_CLOUDFLARE_API_TOKEN` is honored first for separate credentials. |
 | `AI_GATEWAY_API_KEY` | none | Vercel AI Gateway; used when no other provider key is present. |
-| `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, or `vercel` instead of auto-detection. |
+| `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, or `compatible` instead of auto-detection. |
 | `JEV_MCP_MODEL` | `jev-latest` | Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
 | `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
+| `JEV_API_BASE_URL` + `JEV_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `JEV_PROVIDER=compatible`. `JEV_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
 
 ### Vercel
 
@@ -595,6 +596,19 @@ With `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set (and no other provid
 ### OpenRouter
 
 If you already have an OpenRouter key, that is all you need: with no `TYPESAFE_API_KEY` present, every call goes through OpenRouter's Decisions API at identical pricing. The endpoint is alpha and adds a hop, and OpenRouter serves pinned versions rather than a `latest` alias, so the default `jev-latest` maps to `typesafe/jev-1.13` there. Direct TypeSafe remains the recommended default when you have both keys.
+
+### Jev-compatible endpoints
+
+For a service that implements the same System One request and response contract, set the provider explicitly:
+
+```bash
+export JEV_PROVIDER=compatible
+export JEV_API_BASE_URL=https://api.openjev.sh/v1/systemone
+export JEV_API_KEY=your-compatible-provider-key
+export JEV_MCP_MODEL=openjev
+```
+
+The server sends `POST` requests with `{ model, state, questions }` and requires the standard response shape: an `answers` object carrying one answer per requested question, each valid for its question type (a finite [0,1] noul probability, a choice among that question's criteria, or a score within its rubric), plus a `usage` object reporting `input_tokens` and `output_tokens`. Malformed responses are rejected at the transport boundary rather than passed through to the tools, and an optional `model` string echoes the model that answered. `JEV_API_BASE_URL` must be the full endpoint URL including the `/v1/systemone` path; it is used verbatim, with no trailing-slash or path normalization. The endpoint and credentials are kept in the local process environment. This adapter is provider-neutral; OpenJEV is one example, not a hard-coded dependency.
 
 ## Also in the family
 
