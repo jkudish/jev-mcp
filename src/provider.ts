@@ -109,6 +109,27 @@ function resolve(env: NodeJS.ProcessEnv): JevProvider {
   );
 }
 
+// Normalize the AI SDK evaluate envelope without making a provider request.
+export function adaptVercelAnswers(result: {
+  answers?: Record<string, any> | null;
+  providerMetadata?: Record<string, any> | null;
+}): Record<string, any> {
+  const confidence = (result.providerMetadata?.typesafe?.confidence ?? {}) as Record<string, number>;
+  const adapted: Record<string, any> = {};
+  for (const [id, answer] of Object.entries((result.answers ?? {}) as Record<string, any>)) {
+    if (answer?.type === "boolean") {
+      adapted[id] = { type: "noul", noul: answer.probability };
+    } else if (answer?.type === "choice") {
+      adapted[id] = { type: "choice", choice: answer.choice, probabilities: answer.probabilities ?? {}, confidence: confidence[id] ?? null };
+    } else if (answer?.type === "score") {
+      adapted[id] = { type: "score", score: answer.score, probabilities: answer.probabilities ?? {}, confidence: confidence[id] ?? null };
+    } else {
+      adapted[id] = answer;
+    }
+  }
+  return adapted;
+}
+
 export async function askJev(
   state: unknown,
   questions: Record<string, unknown>,
@@ -233,21 +254,8 @@ export async function askJev(
     questions: vercelQuestions as any,
     abortSignal: signal,
   });
-  const confidence = ((result as any).providerMetadata?.typesafe?.confidence ?? {}) as Record<string, number>;
-  const adapted: Record<string, any> = {};
-  for (const [id, answer] of Object.entries(result.answers as Record<string, any>)) {
-    if (answer?.type === "boolean") {
-      adapted[id] = { type: "noul", noul: answer.probability };
-    } else if (answer?.type === "choice") {
-      adapted[id] = { type: "choice", choice: answer.choice, probabilities: answer.probabilities ?? {}, confidence: confidence[id] ?? null };
-    } else if (answer?.type === "score") {
-      adapted[id] = { type: "score", score: answer.score, probabilities: answer.probabilities ?? {}, confidence: confidence[id] ?? null };
-    } else {
-      adapted[id] = answer;
-    }
-  }
   return {
-    answers: adapted,
+    answers: adaptVercelAnswers(result),
     usage: { input_tokens: result.usage?.inputTokens ?? 0, output_tokens: result.usage?.outputTokens ?? 0 },
     provider,
     model: "typesafe-ai/jev",
