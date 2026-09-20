@@ -5,7 +5,7 @@
 
 Fast, cheap, typed judgments from TypeSafe's Jev model, as MCP tools.
 
-Give your agent ten judgment tools:
+Give your agent eleven judgment tools:
 
 - `jev_verify` checks claims against evidence.
 - `jev_screen` judges content before it enters context.
@@ -15,6 +15,7 @@ Give your agent ten judgment tools:
 - `jev_decide` settles bounded alternatives.
 - `jev_compare` judges how two passages relate.
 - `jev_extract` pulls field values with regex plus judgment.
+- `jev_route` returns an agent-neutral task routing decision and required capabilities.
 - `jev_review` scores a proposed diff before the task is called done.
 - `jev_gate` reviews a patch and verifies completion claims in one call.
 
@@ -124,6 +125,52 @@ args = ["-y", "@jkudish/jev-mcp"]
 Some MCP clients filter the environment before spawning servers, which silently drops `TYPESAFE_API_KEY`. If the server reports a missing key, pass it explicitly as shown above.
 
 ## The tools
+
+### jev_route
+
+Return a structured routing decision that any host agent can consume. The tool classifies the task's intent, workflow,
+risk, context policy, model tier, execution mode, and required generic capabilities. It never reads the repository, runs
+commands, calls downstream tools, or applies changes. The host agent maps capability IDs to its own tools and enforces
+confirmation and execution policy.
+
+```jsonc
+// arguments
+{
+  "task": "Fix the expired-token 500 error in the login endpoint and run focused tests",
+  "available_capabilities": [
+    "repository.read", "repository.edit", "command.test", "code.review"
+  ],
+  "constraints": {
+    "read_only": false,
+    "require_confirmation_for_high_risk": true
+  }
+}
+```
+
+```jsonc
+// result, abridged
+{
+  "decision": "route",
+  "intent": "bug_fix",
+  "workflow": "debug_and_test",
+  "risk": "medium",
+  "required_capabilities": ["repository.read", "repository.edit", "command.test"],
+  "missing_capabilities": [],
+  "context_policy": "affected_files_and_tests",
+  "model_tier": "strong",
+  "execution_mode": "edit",
+  "should_review": false,
+  "requires_confirmation": false,
+  "confidence": 0.91,
+  "margin": 0.72,
+  "fallback": "default_workflow"
+}
+```
+
+Generic capability IDs are intentionally client-neutral (`repository.read`, `command.test`, `browser.interact`, and so
+on). A low confidence or margin, missing capability, malformed response, or read-only conflict returns `decision:
+review` with `execution_mode: ask_user` or `read_only`. The route is advisory; the host remains responsible for the
+actual workflow and policy.
 
 ### jev_verify
 
@@ -495,6 +542,7 @@ The two true claims verify at full confidence, and the one that matters, "the fu
 - `jev_decide`: choose between a handful of options with priorities in view.
 - `jev_compare`: how two passages relate, overall or per aspect.
 - `jev_extract`: pull field values a regex can find, verbatim.
+- `jev_route`: classify a task before selecting the host agent's downstream tools.
 - `jev_review`: score a proposed diff before calling the task done.
 - `jev_gate`: that same review plus completion claims checked against evidence.
 

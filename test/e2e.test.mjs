@@ -36,7 +36,7 @@ function payload(result) {
   return JSON.parse(block.text);
 }
 
-test("lists the ten tools", { skip: !hasKey }, async () => {
+test("lists the eleven tools", { skip: !hasKey }, async () => {
   await withClient(async (client) => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
@@ -49,6 +49,7 @@ test("lists the ten tools", { skip: !hasKey }, async () => {
       "jev_gate",
       "jev_rerank",
       "jev_review",
+      "jev_route",
       "jev_screen",
       "jev_verify",
     ]);

@@ -210,6 +210,98 @@ export function rerankByScore<T extends object>(candidates: T[], scores: number[
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Agent-neutral task routing (jev_route)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Capabilities are deliberately generic so any host agent can map them locally. */
+export const ROUTE_CAPABILITIES = [
+  "repository.read",
+  "repository.edit",
+  "command.test",
+  "code.review",
+  "browser.navigate",
+  "browser.interact",
+  "docs.search",
+  "external.api",
+  "user.confirmation",
+] as const;
+
+/** Bound task text so routing remains a small classification request. */
+export const MAX_ROUTE_TASK_CHARS = 8_000;
+
+export const ROUTE_INTENTS: Record<string, string> = {
+  bug_fix: "Diagnose and correct an existing defect",
+  feature: "Implement a new capability or behavior",
+  refactor: "Change structure or maintainability without changing intended behavior",
+  review: "Inspect or assess existing work",
+  research: "Find, compare, or explain information before acting",
+  browser_task: "Complete or plan an interaction with a browser or website",
+  question: "Answer a question without changing external state",
+};
+
+export const ROUTE_WORKFLOWS: Record<string, string> = {
+  answer: "Answer the request from available context",
+  research: "Gather and synthesize relevant information",
+  debug_and_test: "Inspect the affected area, make a fix, and run focused tests",
+  implement: "Modify the relevant artifacts and validate the change",
+  review: "Inspect the proposed work and report findings",
+  browser_task: "Use browser capabilities to complete the requested task",
+  plan: "Produce an execution plan before making changes",
+};
+
+export const ROUTE_RISKS: Record<string, string> = {
+  low: "Low impact and reversible; no external side effect is expected",
+  medium: "Could affect behavior or require a bounded change",
+  high: "Could cause consequential changes, external side effects, or data loss",
+};
+
+export const ROUTE_CONTEXT_POLICIES: Record<string, string> = {
+  minimal: "Use only the task and directly relevant context",
+  affected_files_and_tests: "Read affected artifacts and focused tests before acting",
+  full_task: "Gather the broader task context before selecting an action",
+};
+
+export const ROUTE_MODEL_TIERS: Record<string, string> = {
+  fast: "A fast model or lightweight tool is sufficient",
+  balanced: "Use the normal general-purpose model or workflow",
+  strong: "Use the strongest available model or add review before acting",
+};
+
+export const ROUTE_EXECUTION_MODES: Record<string, string> = {
+  read_only: "Inspect or answer without changing external state",
+  edit: "Modify artifacts, with validation delegated to the host",
+  execute: "Run commands or external actions selected by the host",
+  review: "Return findings or a proposed decision for human or host review",
+  ask_user: "Pause for a missing capability, preference, or confirmation",
+};
+
+/** Return capabilities the route requires but the host did not advertise. */
+export function routeMissingCapabilities(required: string[], available: string[]): string[] {
+  const availableSet = new Set(available);
+  return required.filter((capability, index) => required.indexOf(capability) === index && !availableSet.has(capability));
+}
+
+/** Low confidence, weak margin, or missing host capabilities require a handoff. */
+export function routeAction(
+  confidence: number | null,
+  margin: number,
+  missingCapabilities: number,
+  autoAccept = 0.8,
+  minimumMargin = 0.2,
+): "route" | "review" {
+  if (
+    confidence === null ||
+    !Number.isFinite(confidence) ||
+    confidence < autoAccept ||
+    margin < minimumMargin ||
+    missingCapabilities > 0
+  ) {
+    return "review";
+  }
+  return "route";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Patch review and completion gate (jev_review / jev_gate)
 // Question design adapted from burnigtm/jev-mcp (MIT) via PR #2 by rimusz;
 // thresholds are parameters and arithmetic stays here.

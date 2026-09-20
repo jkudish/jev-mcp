@@ -17,6 +17,8 @@ import {
   MAX_ITEM_CHARS,
   MAX_ITEMS,
   MAX_REQUIREMENTS,
+  routeAction,
+  routeMissingCapabilities,
   rankCandidates,
   RELATION_TO_VERDICT,
   requireCompleteContext,
@@ -31,6 +33,20 @@ import {
   truncate,
   verifyAction,
 } from "../dist/lib.js";
+
+test("routeMissingCapabilities preserves order and removes duplicates", () => {
+  assert.deepEqual(
+    routeMissingCapabilities(["repository.read", "command.test", "repository.read"], ["repository.read"]),
+    ["command.test"],
+  );
+});
+
+test("routeAction requires confidence, margin, and advertised capabilities", () => {
+  assert.equal(routeAction(0.91, 0.4, 0), "route");
+  assert.equal(routeAction(0.91, 0.1, 0), "review");
+  assert.equal(routeAction(0.91, 0.4, 1), "review");
+  assert.equal(routeAction(null, 1, 0), "review");
+});
 
 test("sanitizeId keeps safe characters and drops the rest", () => {
   assert.equal(sanitizeId("src/lib.ts"), "src_lib.ts");

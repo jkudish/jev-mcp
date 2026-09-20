@@ -504,3 +504,95 @@ test("jev_gate makes one request, keeps injected directives in state, and frames
     payload(result);
   });
 });
+
+function routeAnswers(request, { includeTest = true } = {}) {
+  const choices = {
+    intent: "bug_fix",
+    workflow: "debug_and_test",
+    risk: "medium",
+    context_policy: "affected_files_and_tests",
+    model_tier: "strong",
+    execution_mode: "edit",
+  };
+  const answers = Object.fromEntries(
+    Object.entries(choices).map(([id, selected]) => [id, pick(selected, Object.keys(request.questions[id].criteria))]),
+  );
+  for (const id of Object.keys(request.questions).filter((key) => key.startsWith("capability_"))) {
+    const required = ["repository.read", "repository.edit", ...(includeTest ? ["command.test"] : [])];
+    answers[id] = { noul: required.includes(id.slice("capability_".length)) ? 0.95 : 0.05 };
+  }
+  return answers;
+}
+
+test("jev_route returns an agent-neutral decision and required capabilities", async () => {
+  await withMock((request) => routeAnswers(request), async (client, requests) => {
+    const result = await client.callTool({
+      name: "jev_route",
+      arguments: {
+        task: "Fix the expired-token 500 error in the login endpoint and run focused tests",
+        available_capabilities: ["repository.read", "repository.edit", "command.test", "code.review"],
+        constraints: { require_confirmation_for_high_risk: true },
+      },
+    });
+    const body = payload(result);
+    assert.equal(requests.length, 1);
+    assert.equal(body.status, "ok");
+    assert.equal(body.decision, "route");
+    assert.equal(body.intent, "bug_fix");
+    assert.equal(body.workflow, "debug_and_test");
+    assert.deepEqual(body.missing_capabilities, []);
+    assert.deepEqual(body.required_capabilities, ["repository.read", "repository.edit", "command.test"]);
+    assert.equal(body.execution_mode, "edit");
+    assert.equal(body.should_review, false);
+    assert.match(requests[0].body.state.task, /expired-token/);
+  });
+});
+
+test("jev_route asks the host to review when a required capability is missing", async () => {
+  await withMock((request) => routeAnswers(request), async (client) => {
+    const result = await client.callTool({
+      name: "jev_route",
+      arguments: {
+        task: "Fix the expired-token 500 error",
+        available_capabilities: ["repository.read", "repository.edit"],
+      },
+    });
+    const body = payload(result);
+    assert.equal(body.decision, "review");
+    assert.deepEqual(body.missing_capabilities, ["command.test"]);
+    assert.equal(body.execution_mode, "ask_user");
+    assert.equal(body.reason, "missing_capability");
+  });
+});
+
+test("jev_route treats malformed answers conservatively", async () => {
+  await withMock({}, async (client) => {
+    const result = await client.callTool({
+      name: "jev_route",
+      arguments: { task: "Explain this error", available_capabilities: ["repository.read"] },
+    });
+    const body = payload(result);
+    assert.equal(body.status, "review");
+    assert.equal(body.reason, "invalid_response");
+    assert.equal(body.execution_mode, "ask_user");
+    assert.equal(body.requires_confirmation, true);
+  });
+});
+
+test("jev_route respects a read-only constraint", async () => {
+  await withMock((request) => routeAnswers(request), async (client) => {
+    const result = await client.callTool({
+      name: "jev_route",
+      arguments: {
+        task: "Fix the expired-token 500 error",
+        available_capabilities: ["repository.read", "repository.edit", "command.test"],
+        constraints: { read_only: true },
+      },
+    });
+    const body = payload(result);
+    assert.equal(body.decision, "review");
+    assert.equal(body.reason, "read_only_conflict");
+    assert.equal(body.execution_mode, "read_only");
+    assert.equal(body.should_review, true);
+  });
+});
