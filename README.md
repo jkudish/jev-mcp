@@ -164,7 +164,7 @@ Malformed or missing relation answers fail closed per claim (other valid claims 
 }
 ```
 
-- Relation choices must belong to the requested set and be a maximum-probability option. Distributions must contain exactly all relation keys, with finite probabilities in `[0,1]` summing to 1 within `0.01`.
+- Relation choices must belong to the requested set and be a maximum-probability option. Distributions must contain exactly all relation keys, with finite probabilities in `[0,1]` summing to 1 within `0.01` (the shared float-safe tolerance in `src/lib.ts`).
 - Missing or null confidence stays `null` and requires `review`, even with `auto_accept: 0`. Non-number, non-finite, or out-of-range confidence invalidates the claim and is returned as `null`; numeric zero is valid.
 - With multiple evidence items, each claim also gets the id of the evidence it rests on. These source answers are optional auxiliary information; missing sources yield `supporting_evidence: null` without invalidating a valid relation.
 - `auto_accept` (default `0.8`) is the confidence at or above which a verdict stands. Lower-confidence verdicts come back flagged `review`.
@@ -247,7 +247,7 @@ Missing or malformed `exists` or `best` answers return an error branch:
 }
 ```
 
-`exists` must be a finite number in `[0,1]`; zero validly means `absent`. On failure, a valid `exists` value is retained; an invalid or missing value becomes `null`. The best distribution must contain exactly all candidate ids, finite probabilities in `[0,1]` summing to 1 within `0.01`, and a string choice tied for the maximum probability. Missing, null, or non-object `answers` also returns this error branch. Protocol failure is reported only in `status`; `exists_verdict` is `null` on failure.
+`exists` must be a finite number in `[0,1]`; zero validly means `absent`. On failure, a valid `exists` value is retained; an invalid or missing value becomes `null`. The best distribution must contain exactly all candidate ids, finite probabilities in `[0,1]` summing to 1 within the same shared `0.01` tolerance (`src/lib.ts`), and a string choice tied for the maximum probability. Missing, null, or non-object `answers` also returns this error branch. Protocol failure is reported only in `status`; `exists_verdict` is `null` on failure.
 
 - On successful responses, ranking always returns a winner, because Choice probabilities sum to 1. A top hit can masquerade as an answer when none is present; the exists check catches that. `exists_verdict` is `answered`, `partial`, or `absent`.
 - Up to 250 candidates per call. Candidate texts are truncated at 2,000 characters.
