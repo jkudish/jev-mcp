@@ -30,6 +30,10 @@ async function withClient(fn) {
   }
 }
 
+// Float-safe tolerance for probability-sum assertions: a mathematically exact
+// 0.01 delta (e.g. a 0.99 sum) can compare greater than 0.01 in IEEE-754.
+const PROBABILITY_SUM_TOLERANCE = 0.01 + 1e-12;
+
 function payload(result) {
   assert.notEqual(result.isError, true, "tool returned an error");
   const block = result.content?.find((b) => b.type === "text");
@@ -84,7 +88,7 @@ test("jev_classify routes support tickets and preserves external ids", { skip: !
       assert.deepEqual(Object.keys(item.probabilities).sort(), ["billing", "technical"]);
       const values = Object.values(item.probabilities);
       assert.ok(values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1));
-      assert.ok(Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) <= 0.01);
+      assert.ok(Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) <= PROBABILITY_SUM_TOLERANCE);
       const ranked = values.slice().sort((a, b) => b - a);
       const selectedProbability = item.probabilities[item.classification];
       assert.ok(selectedProbability >= ranked[0] - 1e-9);
@@ -132,7 +136,7 @@ test("jev_decide selects the deployment that works offline", { skip: !hasKey }, 
     );
     const values = Object.values(recommendation.probabilities);
     assert.ok(values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1));
-    assert.ok(Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) <= 0.01);
+    assert.ok(Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) <= PROBABILITY_SUM_TOLERANCE);
     assert.ok(recommendation.probabilities[recommendation.selected] >= Math.max(...values) - 1e-9);
     assert.equal(body.requirements_checked, 1);
     assert.ok(Array.isArray(body.checks));
