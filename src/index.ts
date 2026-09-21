@@ -62,6 +62,7 @@ import {
   rerankByScore,
   RELATION_TO_VERDICT,
   screenRecommendation,
+  sumsToOne,
   truncate,
   verifyAction,
   VERIFY_CLAIM_CRITERIA,
@@ -482,7 +483,6 @@ server.registerTool(
       const probabilities: Record<string, number> = answer?.probabilities ?? {};
       const keys = Object.keys(probabilities);
       const values = Object.values(probabilities);
-      const sum = values.reduce((a, b) => a + b, 0);
       const valid =
         answer &&
         typeof answer.choice === "string" &&
@@ -490,7 +490,7 @@ server.registerTool(
         keys.length >= expected.size &&
         keys.every((k) => expected.has(k)) &&
         values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) &&
-        Math.abs(sum - 1) <= 0.01 &&
+        sumsToOne(probabilities) &&
         !(probabilities[answer.choice] < Math.max(...values) - 1e-9);
 
       if (!valid) {
@@ -651,7 +651,7 @@ server.registerTool(
         keys.length !== expected.size ||
         !keys.every((k) => expected.has(k)) ||
         !values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) ||
-        Math.abs(values.reduce((a: number, b: number) => a + b, 0) - 1) > 0.01 ||
+        !sumsToOne(probabilities) ||
         // Choice contract: the chosen option must be the argmax.
         probabilities[answer.choice] < Math.max(...values) - 1e-9
       )
@@ -878,7 +878,7 @@ server.registerTool(
         keys.length !== expected.size ||
         !keys.every((k) => expected.has(k)) ||
         !values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) ||
-        Math.abs(values.reduce((x, y) => x + y, 0) - 1) > 0.01 ||
+        !sumsToOne(probabilities) ||
         // Choice contract: the chosen option must be the argmax.
         probabilities[(answer as any).choice] < Math.max(...values) - 1e-9
       )
@@ -1107,7 +1107,7 @@ server.registerTool(
         keys.length === expectedKeys.size &&
         keys.every((k) => expectedKeys.has(k)) &&
         values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) &&
-        Math.abs(values.reduce((x, y) => x + y, 0) - 1) <= 0.01 &&
+        sumsToOne(probabilities) &&
         probabilities[answer.choice] >= Math.max(...values) - 1e-9;
       if (!valid) {
         return { id: f.id, value: null, status: "invalid_response" as const, reason: null, candidates_considered: f.candidates.length, ...flags };
@@ -1235,7 +1235,7 @@ function validateChoiceAnswer(answer: unknown, expectedKeys: string[]): {
     !expected.has(answer.choice) || keys.length !== expected.size ||
     !keys.every((key) => expected.has(key)) ||
     !values.every((p) => typeof p === "number" && Number.isFinite(p) && p >= 0 && p <= 1) ||
-    Math.abs(values.reduce((a, b) => a + b, 0) - 1) > 0.01 ||
+    !sumsToOne(probabilities) ||
     probabilities[answer.choice] < Math.max(...values) - 1e-9
   ) return null;
   const confidence =
@@ -1494,7 +1494,7 @@ server.registerTool(
         keys.length !== expectedClaimKeys.size ||
         !keys.every((k) => expectedClaimKeys.has(k)) ||
         !values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) ||
-        Math.abs(values.reduce((a: number, b: number) => a + b, 0) - 1) > 0.01 ||
+        !sumsToOne(probabilities) ||
         probabilities[answer.choice] < Math.max(...values) - 1e-9
       )
         return null;

@@ -28,6 +28,8 @@ import {
   hasNonEmptyEvidence,
   sanitizeId,
   screenRecommendation,
+  sumsToOne,
+  PROBABILITY_SUM_TOLERANCE,
   truncate,
   verifyAction,
 } from "../dist/lib.js";
@@ -282,4 +284,28 @@ test("review/gate caps keep real diffs reviewable", () => {
   assert.ok(MAX_REVIEW_DOC_CHARS >= 50_000, "per-document cap must fit real diffs");
   assert.ok(MAX_CLAIM_CHARS >= 500 && MAX_CLAIM_CHARS <= 4_000);
   assert.ok(MAX_GATE_CLAIMS >= 5 && MAX_GATE_CLAIMS <= 40);
+});
+
+test("sumsToOne accepts a distribution that is one ulp past the nominal tolerance", () => {
+  // 0.8 + 0.19 is mathematically 0.99, but IEEE-754 computes 0.010000000000000009
+  // away from 1, which a bare <= 0.01 comparison would reject.
+  assert.equal(sumsToOne({ a: 0.8, b: 0.19 }), true);
+  assert.ok(Math.abs(0.8 + 0.19 - 1) > 0.01, "the float delta really does exceed 0.01");
+});
+
+test("sumsToOne accepts exact and boundary distributions and rejects real drift", () => {
+  assert.equal(sumsToOne({ a: 0.9, b: 0.05, c: 0.05 }), true);
+  assert.equal(sumsToOne({ a: 0.5, b: 0.49 }), true);
+  assert.equal(sumsToOne({ a: 1 }), true);
+  assert.equal(sumsToOne({ a: 0.5, b: 0.48 }), false);
+  // A mathematically exact 0.01 delta on either side is inside the budget.
+  assert.equal(sumsToOne({ a: 0.5, b: 0.5, c: 0.01 }), true);
+  assert.equal(sumsToOne({ a: 0.51, b: 0.51 }), false);
+  assert.equal(sumsToOne({ a: 0.5, b: 0.5, c: 0.02 }), false);
+  assert.equal(sumsToOne({}), false);
+});
+
+test("PROBABILITY_SUM_TOLERANCE is the nominal 0.01 plus one epsilon of slack", () => {
+  assert.equal(PROBABILITY_SUM_TOLERANCE, 0.01 + 1e-12);
+  assert.ok(PROBABILITY_SUM_TOLERANCE > 0.01 && PROBABILITY_SUM_TOLERANCE < 0.01 + 1e-9);
 });

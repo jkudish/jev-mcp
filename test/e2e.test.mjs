@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { PROBABILITY_SUM_TOLERANCE } from "../dist/lib.js";
 
 const serverPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 const hasKey = Boolean(process.env.TYPESAFE_API_KEY);
@@ -30,9 +31,8 @@ async function withClient(fn) {
   }
 }
 
-// Float-safe tolerance for probability-sum assertions: a mathematically exact
-// 0.01 delta (e.g. a 0.99 sum) can compare greater than 0.01 in IEEE-754.
-const PROBABILITY_SUM_TOLERANCE = 0.01 + 1e-12;
+// Probability-sum assertions use the same float-safe tolerance as the
+// production guard (src/lib.ts), so the two cannot drift apart.
 
 function payload(result) {
   assert.notEqual(result.isError, true, "tool returned an error");

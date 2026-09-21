@@ -108,6 +108,21 @@ export const MAX_ITEMS = 64;
 /** Item text cap; classification works on bounded excerpts, not whole documents. */
 export const MAX_ITEM_CHARS = 2000;
 
+/**
+ * Sum tolerance for Choice distributions. A mathematically exact delta of 0.01
+ * can compare greater than 0.01 in IEEE-754 (summing 0.8 and 0.19 lands one
+ * ulp past 0.01 from 1), so the nominal tolerance carries one epsilon of slack.
+ * Every distribution check routes through sumsToOne so the contract cannot
+ * drift between classify, decide, compare, extract, gate, verify, and find.
+ */
+export const PROBABILITY_SUM_TOLERANCE = 0.01 + 1e-12;
+
+/** True when a Choice distribution's probabilities sum to 1 within the shared tolerance. */
+export function sumsToOne(probabilities: Record<string, number>): boolean {
+  const sum = Object.values(probabilities).reduce((a, b) => a + b, 0);
+  return Math.abs(sum - 1) <= PROBABILITY_SUM_TOLERANCE;
+}
+
 /** Winner-to-runner-up gap; a lone probability has no runner-up, so its margin is 0. */
 export function marginOf(probabilities: Record<string, number> | undefined | null): number {
   const ranked = Object.values(probabilities ?? {}).sort((a, b) => b - a);
