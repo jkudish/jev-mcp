@@ -11,21 +11,45 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const serverPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 
 // undefined omits the answers key; null is sent explicitly.
-// response overrides for non-happy-path cases: status (non-2xx), raw (verbatim
-// body string), usage (null omits the key), and model (echoed field).
+// response overrides for non-happy-path cases: status (non-2xx, or a function
+// of the 1-based request count for retry sequences), raw (verbatim body
+// string), usage (null omits the key), model (echoed field), hang (truthy or
+// a function of the count: never answer, so the deadline or the caller's
+// abort decides how the request ends), reset (destroy the socket instead of
+// answering: an ambiguous network failure), and stall (send headers and a
+// partial body, then never finish).
 async function withMock(answers, fn, extraEnv = {}, response = {}) {
   const requests = [];
   const http = createServer((req, res) => {
+    // A client that aborts mid-body (byte-ceiling, deadline, cancellation)
+    // surfaces as a socket error here; swallow it so the test process survives.
+    req.on("error", () => {});
+    res.on("error", () => {});
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", () => {
       requests.push({ method: req.method, path: req.url, headers: req.headers, body: JSON.parse(raw) });
+      const count = requests.length;
+      const hang = typeof response.hang === "function" ? response.hang(count) : response.hang;
+      if (hang) return; // never respond
+      const status = typeof response.status === "function" ? response.status(count) : (response.status ?? 200);
+      const reset = typeof response.reset === "function" ? response.reset(count) : response.reset;
+      if (reset) {
+        res.destroy(); // ambiguous connection failure mid-response
+        return;
+      }
+      const stall = typeof response.stall === "function" ? response.stall(count) : response.stall;
+      if (stall) {
+        res.writeHead(status, { "Content-Type": "application/json" });
+        res.write('{"answers":'); // headers arrive, body never completes
+        return;
+      }
       const mockBody = {
         answers: typeof answers === "function" ? answers(JSON.parse(raw)) : answers,
       };
       if (response.usage !== null) mockBody.usage = response.usage ?? { input_tokens: 10, output_tokens: 10 };
       if (response.model !== undefined) mockBody.model = response.model;
-      res.writeHead(response.status ?? 200, { "Content-Type": "application/json" });
+      res.writeHead(status, { "Content-Type": "application/json" });
       res.end(typeof response.raw === "string" ? response.raw : JSON.stringify(mockBody));
     });
   });
@@ -50,6 +74,8 @@ async function withMock(answers, fn, extraEnv = {}, response = {}) {
   } finally {
     await client.close();
     http.close();
+    // Reap any connection left open by a hanging handler; test is over.
+    http.closeAllConnections();
   }
 }
 
@@ -166,6 +192,365 @@ test("compatible provider reports non-2xx status with the body redacted", async 
     },
     compatibleEnv,
     { status: 401, raw: JSON.stringify({ error: "Unauthorized client for Bearer compatible-test-key (compatible-test-key)" }) },
+  );
+});
+
+test("compatible provider retries a retryable 5xx once and succeeds on the second attempt", async () => {
+  // Only statuses that mean the request was not processed are retried; the
+  // second attempt returns a valid envelope, so the tool result is clean.
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.notEqual(result.isError, true);
+      const body = payload(result);
+      assert.equal(body.results[0].verdict, "verified");
+      assert.equal(requests.length, 2);
+    },
+    compatibleEnv,
+    { status: (count) => (count === 1 ? 503 : 200) },
+  );
+});
+
+test("compatible provider stops after JEV_MCP_MAX_ATTEMPTS attempts and surfaces the last status", async () => {
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /503/);
+      assert.equal(requests.length, 2);
+    },
+    (port) => compatibleEnv(port, { JEV_MCP_MAX_ATTEMPTS: "2" }),
+    { status: 503, raw: JSON.stringify({ error: "unavailable" }) },
+  );
+});
+
+test("compatible provider does not retry a non-retryable status", async () => {
+  // A 400 means the request was processed and rejected; re-sending it would
+  // burn a paid call for a deterministic outcome.
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /400/);
+      assert.equal(requests.length, 1);
+    },
+    compatibleEnv,
+    { status: 400, raw: JSON.stringify({ error: "bad request" }) },
+  );
+});
+
+test("compatible provider never retries an unparseable 200 body", async () => {
+  // Parse failures are protocol violations, not transient errors.
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /invalid response/i);
+      assert.equal(requests.length, 1);
+    },
+    compatibleEnv,
+    { raw: "not json at all" },
+  );
+});
+
+test("compatible provider aborts an oversized response body without retrying", async () => {
+  // The byte ceiling is enforced while streaming, not after buffering, and
+  // oversized bodies are never re-fetched.
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /exceeded 1000000 bytes/);
+      assert.equal(requests.length, 1);
+    },
+    compatibleEnv,
+    { raw: "x".repeat(1_050_000) },
+  );
+});
+
+test("a hanging endpoint hits the request deadline without retrying", async () => {
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /exceeded the 200ms deadline/);
+      assert.equal(requests.length, 1);
+    },
+    (port) => compatibleEnv(port, { JEV_MCP_REQUEST_TIMEOUT_MS: "200" }),
+    { hang: true },
+  );
+});
+
+test("caller cancellation aborts the in-flight request without retrying and the server survives", async () => {
+  // The client aborts mid-hang; the transport relays the abort (deadline
+  // untouched), never re-sends, and a follow-up call on the same server
+  // completes normally.
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client, requests) => {
+      const controller = new AbortController();
+      const pending = client
+        .callTool(
+          { name: "jev_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } },
+          undefined,
+          { signal: controller.signal },
+        )
+        .then(
+          () => assert.fail("callTool should have rejected"),
+          (error) => error,
+        );
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      controller.abort();
+      const error = await pending;
+      assert.ok(error instanceof Error);
+      assert.equal(requests.length, 1);
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.notEqual(result.isError, true);
+      assert.equal(payload(result).results[0].verdict, "verified");
+      assert.equal(requests.length, 2);
+    },
+    (port) => compatibleEnv(port, { JEV_MCP_REQUEST_TIMEOUT_MS: "15000" }),
+    { hang: (count) => count === 1 },
+  );
+});
+
+test("compatible provider does not retry an ambiguous connection failure", async () => {
+  // A reset connection cannot prove the request was not processed; without an
+  // idempotency key, re-sending can double-process a paid call.
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.equal(requests.length, 1);
+    },
+    compatibleEnv,
+    { reset: true },
+  );
+});
+
+test("deadline expiry during retry backoff surfaces promptly without another attempt", async () => {
+  await withMock(
+    {},
+    async (client, requests) => {
+      // Measured from just before the call, so spawn time cannot eat the
+      // budget. With a 300ms deadline, the abort-aware backoff ends at the
+      // deadline, with at most one instantly-aborted extra request when the
+      // first jittered sleep (250-500ms) resolves before it. Probabilistic,
+      // not airtight: if that sleep outlasts the deadline, a plain-sleep
+      // regression would also finish fast with two requests. The other half
+      // of the jitter range chains sleep1 + sleep2 (750ms of backoff alone),
+      // tripping both this bound and the request count.
+      const started = Date.now();
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /exceeded the 300ms deadline/);
+      assert.ok(requests.length <= 2, `expected at most 2 requests, saw ${requests.length}`);
+      assert.ok(Date.now() - started < 1000, "deadline should cut the backoff sleep short");
+    },
+    (port) => compatibleEnv(port, { JEV_MCP_REQUEST_TIMEOUT_MS: "300", JEV_MCP_MAX_ATTEMPTS: "6" }),
+    { status: 503, raw: JSON.stringify({ error: "unavailable" }) },
+  );
+});
+
+test("a stalled response body hits the deadline while reading", async () => {
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /exceeded the 300ms deadline while reading the response/);
+      assert.equal(requests.length, 1);
+    },
+    (port) => compatibleEnv(port, { JEV_MCP_REQUEST_TIMEOUT_MS: "300" }),
+    { stall: true },
+  );
+});
+
+test("an oversized non-2xx error body is aborted by the byte ceiling without retry", async () => {
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /exceeded 1000000 bytes/);
+      assert.equal(requests.length, 1);
+    },
+    compatibleEnv,
+    { status: 400, raw: "x".repeat(1_050_000) },
+  );
+});
+
+test("the retry allowlist is 408, 409, 429, and 500 through 599", async () => {
+  // 599 is inside the 5xx band and is retried (599 then 200: two requests).
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.notEqual(result.isError, true);
+      assert.equal(requests.length, 2);
+    },
+    compatibleEnv,
+    { status: (count) => (count === 1 ? 599 : 200) },
+  );
+  // 600 is out of range: protocol noise, not a retry signal.
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /600/);
+      assert.equal(requests.length, 1);
+    },
+    compatibleEnv,
+    { status: 600, raw: JSON.stringify({ error: "not a real status class" }) },
+  );
+});
+
+test("openrouter provider redacts a reflected key from error bodies", async () => {
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /OpenRouter decisions API 401/);
+      assert.ok(!result.content[0].text.includes("sk-or-v1-echo-secret"));
+      assert.equal(requests[0].path, "/alpha/decisions");
+      assert.equal(requests[0].headers.authorization, "Bearer sk-or-v1-echo-secret");
+    },
+    (port) => ({
+      JEV_PROVIDER: "openrouter",
+      OPENROUTER_API_KEY: "sk-or-v1-echo-secret",
+      // Trailing slash on purpose: the configured root must join to a
+      // single-slash /alpha/decisions request path.
+      JEV_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}/`,
+    }),
+    { status: 401, raw: JSON.stringify({ error: "invalid key sk-or-v1-echo-secret (Bearer sk-or-v1-echo-secret)" }) },
+  );
+});
+
+test("cloudflare provider redacts the token on every error path", async () => {
+  const cfEnv = (port) => ({
+    JEV_PROVIDER: "cloudflare",
+    JEV_CLOUDFLARE_API_TOKEN: "cf-echo-token",
+    CLOUDFLARE_ACCOUNT_ID: "test-account",
+    JEV_CLOUDFLARE_BASE_URL: `http://127.0.0.1:${port}`,
+  });
+  // success:false with status 200: the body parses unredacted, so the shared
+  // error formatter must be what redacts the echoed token.
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /Cloudflare AI run 200/);
+      assert.ok(!result.content[0].text.includes("cf-echo-token"));
+      assert.match(requests[0].path, /\/accounts\/test-account\/ai\/run$/);
+    },
+    cfEnv,
+    { raw: JSON.stringify({ success: false, errors: ["bad token cf-echo-token"] }) },
+  );
+  // A non-Completed state previously interpolated state and errors unredacted.
+  await withMock(
+    {},
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /state failed/);
+      assert.ok(!result.content[0].text.includes("cf-echo-token"));
+    },
+    cfEnv,
+    { raw: JSON.stringify({ success: true, errors: ["token cf-echo-token echoed"], result: { state: "failed", result: {} } }) },
+  );
+});
+
+test("typesafe provider cancellation aborts promptly through the SDK without crashing the server", async () => {
+  // Default mock env is the typesafe transport pointed at the mock. The
+  // post-headers abort path (the SDK crash scenario) is covered by the
+  // child-process regression; this covers the MCP-level wiring.
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client, requests) => {
+      const controller = new AbortController();
+      const started = Date.now();
+      const pending = client
+        .callTool(
+          { name: "jev_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } },
+          undefined,
+          { signal: controller.signal },
+        )
+        .then(
+          () => assert.fail("callTool should have rejected"),
+          (error) => error,
+        );
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      controller.abort();
+      await pending;
+      assert.ok(Date.now() - started < 5000, "cancellation should surface promptly");
+      assert.equal(requests.length, 1);
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.notEqual(result.isError, true);
+      assert.equal(payload(result).results[0].verdict, "verified");
+    },
+    (port) => ({ TYPESAFE_API_KEY: "test-key", TYPESAFE_BASE_URL: `http://127.0.0.1:${port}` }),
+    { hang: (count) => count === 1 },
   );
 });
 

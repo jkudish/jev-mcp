@@ -80,8 +80,8 @@ const server = new McpServer({ name: "jev-mcp", version: packageVersion });
 
 import { askJev as askProvider } from "./provider.js";
 
-async function askJev(state: unknown, questions: Record<string, unknown>) {
-  const result = await askProvider(state, questions, MODEL);
+async function askJev(state: unknown, questions: Record<string, unknown>, signal?: AbortSignal) {
+  const result = await askProvider(state, questions, MODEL, signal);
   // The typesafe SDK transport returns unchecked `answers: any`; a null or
   // non-object envelope must not crash tools that index it. Normalize once
   // here so every tool takes the same {}-to-invalid_response path. The
@@ -154,7 +154,7 @@ server.registerTool(
         .describe("Verdicts at or above this confidence stand automatically; below it they are flagged 'review'. Default 0.8."),
     }),
   },
-  async ({ claims, evidence: rawEvidence, auto_accept }) => {
+  async ({ claims, evidence: rawEvidence, auto_accept }, extra) => {
     const autoAccept = auto_accept ?? 0.8;
     const evidenceItems =
       typeof rawEvidence === "string"
@@ -191,7 +191,7 @@ server.registerTool(
       evidence,
     };
 
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
 
     const results = claimItems.map((claim) => {
       const relation = answers[`relation_${claim.id}`];
@@ -270,7 +270,7 @@ server.registerTool(
       review_at: z.number().min(0).max(1).optional().describe("Injection probability at or above which content is flagged for review. Default 0.25."),
     }),
   },
-  async ({ text: content, purpose, block_at, review_at }) => {
+  async ({ text: content, purpose, block_at, review_at }, extra) => {
     const blockAt = block_at ?? 0.75;
     const reviewAt = review_at ?? 0.25;
 
@@ -295,7 +295,7 @@ server.registerTool(
     }
 
     const state = { content, purpose: purpose ?? null };
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
 
     const injection = validateNoulAnswer(answers.injection);
     const substance = validateNoulAnswer(answers.substance);
@@ -348,7 +348,7 @@ server.registerTool(
       top_k: z.number().int().min(1).max(50).optional().describe("How many ranked candidates to return. Default 5."),
     }),
   },
-  async ({ query, candidates: rawCandidates, top_k }) => {
+  async ({ query, candidates: rawCandidates, top_k }, extra) => {
     const topK = top_k ?? 5;
     const { items: candidates } = ensureUniqueIds(
       rawCandidates.map((c) => ({ id: c.id ?? "", text: truncate(c.text, MAX_CANDIDATE_CHARS) })),
@@ -365,7 +365,7 @@ server.registerTool(
     };
 
     const state = { query, candidates };
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
 
     const exists = validateNoulAnswer(answers.exists);
     const best = validateChoiceAnswer(answers.best, candidates.map((c) => c.id));
@@ -438,7 +438,7 @@ server.registerTool(
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
     }),
   },
-  async ({ items: rawItems, classes: rawClasses, purpose, context, auto_accept, minimum_margin }) => {
+  async ({ items: rawItems, classes: rawClasses, purpose, context, auto_accept, minimum_margin }, extra) => {
     const autoAccept = auto_accept ?? 0.85;
     const minMargin = minimum_margin ?? 0.5;
 
@@ -487,7 +487,7 @@ server.registerTool(
       );
     }
 
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
 
     const keyToExternal = new Map(classes.map((c) => [c.key, c.external]));
     const results = items.map((item) => {
@@ -582,7 +582,7 @@ server.registerTool(
         .describe("Include ask_user / investigate / none as Choosable options so the model can decline to rank. Default true."),
     }),
   },
-  async ({ decision, evidence, priorities, candidates, requirements: reqs, escape_hatches }) => {
+  async ({ decision, evidence, priorities, candidates, requirements: reqs, escape_hatches }, extra) => {
     const includeHatches = escape_hatches ?? true;
     const requirements = reqs ?? [];
 
@@ -634,7 +634,7 @@ server.registerTool(
       candidates: candidateKeys.map((c) => ({ id: c.key, description: c.description })),
       requirements,
     };
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
 
     const keyToId = new Map(candidateKeys.map((c) => [c.key, c.id]));
     const expectedRecKeys = new Set([...candidateKeys.map((c) => c.key), ...(includeHatches ? Object.keys(DECIDE_ESCAPE_HATCHES) : [])]);
@@ -704,7 +704,7 @@ server.registerTool(
       top_k: z.number().int().min(1).max(250).optional().describe("How many ranked candidates to return. Default: all."),
     }),
   },
-  async ({ query, candidates: rawCandidates, top_k }) => {
+  async ({ query, candidates: rawCandidates, top_k }, extra) => {
     const topK = top_k ?? null;
 
     // Caller IDs are preserved verbatim; opaque wire keys (classify pattern).
@@ -749,7 +749,7 @@ server.registerTool(
       });
     });
 
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
 
     // One invalid Noul makes the whole ordering untrustworthy; never sort a
     // missing answer as a confident zero.
@@ -821,7 +821,7 @@ server.registerTool(
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
     }),
   },
-  async ({ passage_a, passage_b, aspects: rawAspects, purpose, auto_accept, minimum_margin }) => {
+  async ({ passage_a, passage_b, aspects: rawAspects, purpose, auto_accept, minimum_margin }, extra) => {
     const autoAccept = auto_accept ?? 0.85;
     const minMargin = minimum_margin ?? 0.5;
     const aspects = rawAspects ?? [];
@@ -846,7 +846,7 @@ server.registerTool(
     });
 
     const state = { purpose: purpose ?? null, passage_a: a, passage_b: b, aspects };
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
 
     const expected = new Set(Object.keys(COMPARE_RELATIONS));
 
@@ -981,7 +981,7 @@ server.registerTool(
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
     }),
   },
-  async ({ document, fields: rawFields, purpose, auto_accept, minimum_margin }) => {
+  async ({ document, fields: rawFields, purpose, auto_accept, minimum_margin }, extra) => {
     const autoAccept = auto_accept ?? 0.85;
     const minMargin = minimum_margin ?? 0.5;
     const doc = truncate(document, 50000);
@@ -1039,7 +1039,7 @@ server.registerTool(
     }
 
     const { answers, usage, provider, model } =
-      stateFields.length > 0 ? await askJev({ purpose: purpose ?? null, document: doc, fields: stateFields }, questions) : { answers: {} as Record<string, any>, usage: null, provider: "none" as const, model: MODEL };
+      stateFields.length > 0 ? await askJev({ purpose: purpose ?? null, document: doc, fields: stateFields }, questions, extra.signal) : { answers: {} as Record<string, any>, usage: null, provider: "none" as const, model: MODEL };
 
     const results = fields.map((f) => {
       const flags = { candidates_truncated: f.truncated, matches_skipped_too_long: f.tooLong };
@@ -1385,7 +1385,7 @@ server.registerTool(
         .describe("Weighted composite at or above this is required for auto. Default 0.7."),
     }),
   },
-  async ({ request, diff, tests, auto_accept, review_at, composite_floor }) => {
+  async ({ request, diff, tests, auto_accept, review_at, composite_floor }, extra) => {
     const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept ?? 0.8, review_at);
     const compositeFloor = composite_floor ?? DEFAULT_COMPOSITE_FLOOR;
     const truncated =
@@ -1399,7 +1399,7 @@ server.registerTool(
       diff: truncate(diff, MAX_REVIEW_DOC_CHARS),
       tests: tests ? truncate(tests, MAX_REVIEW_DOC_CHARS) : null,
     };
-    const { answers, usage, provider, model } = await askJev(state, reviewQuestions());
+    const { answers, usage, provider, model } = await askJev(state, reviewQuestions(), extra.signal);
 
     return text({
       tool: "jev_review",
@@ -1459,7 +1459,7 @@ server.registerTool(
         .describe("Weighted composite at or above this is required for auto. Default 0.7."),
     }),
   },
-  async ({ request, diff, claims, evidence: rawEvidence, tests, auto_accept, review_at, composite_floor }) => {
+  async ({ request, diff, claims, evidence: rawEvidence, tests, auto_accept, review_at, composite_floor }, extra) => {
     const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept ?? 0.8, review_at);
     const compositeFloor = composite_floor ?? DEFAULT_COMPOSITE_FLOOR;
     const evidence = normalizeEvidence(rawEvidence as never);
@@ -1514,7 +1514,7 @@ server.registerTool(
       );
     });
 
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
 
     const review = projectReviewHalf(answers, { autoAccept, reviewAt, compositeFloor }, truncated);
 
