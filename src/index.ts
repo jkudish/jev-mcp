@@ -80,7 +80,12 @@ const server = new McpServer({ name: "jev-mcp", version: packageVersion });
 import { askJev as askProvider } from "./provider.js";
 
 async function askJev(state: unknown, questions: Record<string, unknown>) {
-  return askProvider(state, questions, MODEL);
+  const result = await askProvider(state, questions, MODEL);
+  // The typesafe SDK transport returns unchecked `answers: any`; a null or
+  // non-object envelope must not crash tools that index it. Normalize once
+  // here so every tool takes the same {}-to-invalid_response path. The
+  // compatible transport already rejects such envelopes itself.
+  return { ...result, answers: (isRecord(result.answers) ? result.answers : {}) as Record<string, any> };
 }
 
 const text = (payload: unknown) => ({
@@ -178,8 +183,7 @@ server.registerTool(
       evidence,
     };
 
-    const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
-    const answers: Record<string, any> = isRecord(rawAnswers) ? rawAnswers : {};
+    const { answers, usage, provider, model } = await askJev(state, questions);
 
     const results = claimItems.map((claim) => {
       const relation = answers[`relation_${claim.id}`];
@@ -283,8 +287,7 @@ server.registerTool(
     }
 
     const state = { content, purpose: purpose ?? null };
-    const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
-    const answers: Record<string, any> = isRecord(rawAnswers) ? rawAnswers : {};
+    const { answers, usage, provider, model } = await askJev(state, questions);
 
     const injection = validateNoulAnswer(answers.injection);
     const substance = validateNoulAnswer(answers.substance);
@@ -354,8 +357,7 @@ server.registerTool(
     };
 
     const state = { query, candidates };
-    const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
-    const answers: Record<string, any> = isRecord(rawAnswers) ? rawAnswers : {};
+    const { answers, usage, provider, model } = await askJev(state, questions);
 
     const exists = validateNoulAnswer(answers.exists);
     const best = validateChoiceAnswer(answers.best, candidates.map((c) => c.id));
@@ -1058,7 +1060,7 @@ server.registerTool(
         keys.length === expectedKeys.size &&
         keys.every((k) => expectedKeys.has(k)) &&
         values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) &&
-        Math.abs(values.reduce((x, y) => x + y, 0) - 1) <= 0.01 &&
+        Math.abs(values.reduce((x, y) => x + y, 0) - 1) <= PROBABILITY_SUM_TOLERANCE &&
         probabilities[answer.choice] >= Math.max(...values) - 1e-9;
       if (!valid) {
         return { id: f.id, value: null, status: "invalid_response" as const, reason: null, candidates_considered: f.candidates.length, ...flags };
