@@ -5,6 +5,7 @@
 
 import { experimental_evaluate } from "ai";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
+import { fetch as undiciFetch } from "undici";
 import { isRecord } from "./lib.js";
 
 export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible";
@@ -46,8 +47,8 @@ const MAX_RETRY_DELAY_MS = 4_000;
 /** Stream-checked ceiling for success and error bodies alike. */
 const MAX_RESPONSE_BYTES = 1_000_000;
 
-/** Only statuses that mean the request was not processed are retried. */
-const isRetryableStatus = (status: number) => status === 408 || status === 409 || status === 429 || status >= 500;
+/** Only the not-processed status allowlist is retried, and 5xx means 500-599: out-of-range statuses are protocol noise, not retry signals. */
+const isRetryableStatus = (status: number) => status === 408 || status === 409 || status === 429 || (status >= 500 && status <= 599);
 
 interface Deadline {
   signal: AbortSignal;
@@ -78,12 +79,38 @@ function deadlineSignal(signal: AbortSignal | undefined, timeoutMs: number): Dea
   };
 }
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
 /** Jittered exponential backoff: 50-100% of the doubling delay, capped. */
 function retryDelayMs(attempt: number): number {
   const exp = Math.min(BASE_RETRY_DELAY_MS * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS);
   return exp * (0.5 + Math.random() * 0.5);
+}
+
+/**
+ * Backoff that ends early, without another attempt, when the deadline expires
+ * or the caller aborts: the whole-request deadline must not be overrun by a
+ * sleep, and a cancelled call must surface promptly.
+ */
+function backoffDelay(attempt: number, deadline: Deadline): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, retryDelayMs(attempt));
+    const onAbort = () => {
+      cleanup();
+      reject(
+        deadline.timedOut()
+          ? new Error(`Jev request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline.`)
+          : deadline.signal.reason,
+      );
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      deadline.signal.removeEventListener("abort", onAbort);
+    };
+    if (deadline.signal.aborted) onAbort();
+    else deadline.signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
@@ -97,16 +124,23 @@ async function readBodyBounded(response: Response, deadline: Deadline): Promise<
   if (!reader) return "";
   const chunks: Uint8Array[] = [];
   let total = 0;
+  // One abort watcher for the whole read, not one per chunk: a fragmented body
+  // must not accumulate listeners and closures while it streams.
+  let onAbort!: () => void;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () =>
+      reject(
+        deadline.timedOut()
+          ? new Error(`Jev request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline while reading the response.`)
+          : deadline.signal.reason,
+      );
+  });
+  aborted.catch(() => {}); // stays handled when a read wins every race
+  deadline.signal.addEventListener("abort", onAbort, { once: true });
   try {
+    if (deadline.signal.aborted) onAbort();
     for (;;) {
-      const { done, value } = await Promise.race([
-        reader.read(),
-        new Promise<never>((_, reject) => {
-          const onAbort = () => reject(deadline.timedOut() ? new Error(`Jev request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline while reading the response.`) : deadline.signal.reason);
-          if (deadline.signal.aborted) onAbort();
-          else deadline.signal.addEventListener("abort", onAbort, { once: true });
-        }),
-      ]);
+      const { done, value } = await Promise.race([reader.read(), aborted]);
       if (done) break;
       total += value.byteLength;
       if (total > MAX_RESPONSE_BYTES) {
@@ -114,10 +148,26 @@ async function readBodyBounded(response: Response, deadline: Deadline): Promise<
       }
       chunks.push(value);
     }
+  } catch (error) {
+    // The body reader races our watcher to the same abort and may reject
+    // first with its raw AbortError; translate, exactly as the fetch catch
+    // does, so deadline expiry reads as a deadline, not "operation aborted".
+    if (deadline.signal.aborted) {
+      throw deadline.timedOut()
+        ? new Error(`Jev request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline while reading the response.`)
+        : deadline.signal.reason;
+    }
+    throw error;
   } finally {
+    deadline.signal.removeEventListener("abort", onAbort);
     // On the success path the reader is already done; on throw this releases
     // the connection instead of leaking it.
     await reader.cancel().catch(() => {});
+    try {
+      reader.releaseLock();
+    } catch {
+      // Already released by cancel on some runtimes.
+    }
   }
   const bytes = new Uint8Array(total);
   let offset = 0;
@@ -129,10 +179,13 @@ async function readBodyBounded(response: Response, deadline: Deadline): Promise<
 }
 
 /**
- * Fetch with bounded, jittered retries on 408/409/429/5xx only. Aborts
- * (caller cancellation), deadline expiry, oversized bodies, parse failures,
- * and non-retryable statuses are surfaced immediately, never re-sent: a
- * retry only happens when the status says the request was not processed.
+ * Fetch with bounded, jittered retries on the 408/409/429/5xx allowlist only.
+ * A status cannot prove the request was not processed, but that allowlist is
+ * the standard not-processed signal set and the only retry trigger. Ambiguous
+ * network-level failures (connection reset mid-response, TLS errors) never
+ * retry: without an idempotency key, re-sending after an ambiguous failure can
+ * double-process a paid call. Caller aborts and deadline expiry surface
+ * immediately, cutting any backoff short, and never retry.
  */
 async function fetchWithResilience(url: string, init: RequestInit, deadline: Deadline): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
@@ -143,15 +196,12 @@ async function fetchWithResilience(url: string, init: RequestInit, deadline: Dea
       if (deadline.timedOut()) {
         throw new Error(`Jev request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline.`);
       }
-      if (deadline.signal.aborted) throw error; // caller cancelled: never retry
-      if (attempt >= MAX_ATTEMPTS) throw error;
-      await sleep(retryDelayMs(attempt));
-      continue;
+      throw error; // caller cancellation or network failure: never re-sent
     }
     if (isRetryableStatus(response.status) && attempt < MAX_ATTEMPTS) {
       // Drain and release the connection before backing off.
       await response.body?.cancel().catch(() => {});
-      await sleep(retryDelayMs(attempt));
+      await backoffDelay(attempt, deadline);
       continue;
     }
     return response;
@@ -159,6 +209,17 @@ async function fetchWithResilience(url: string, init: RequestInit, deadline: Dea
 }
 
 let typesafeClient: TypeSafeClient | null = null;
+
+// SDK 0.6.0 on Node 20/22: cancelling a call after response headers terminates
+// the process through the bundled undici clone/cancel abort path, even when the
+// caller catches the SDK's APIUserAbortError (typesafe-sdk-js#2; fixed upstream
+// in nodejs/undici#4804, bundled from Node 24). Route the SDK through the
+// standalone undici fetch, which carries the fix, so wired-through cancellation
+// stays safe on every supported Node. Verified with a child-process regression
+// on Node 22.23.1: the default fetch exits the process on a handled abort;
+// this injection exits 0. Remove when the SDK ships a fixed release.
+const typesafeFetch = (input: string, init?: RequestInit): Promise<Response> =>
+  undiciFetch(input, init as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
 
 function resolve(env: NodeJS.ProcessEnv): JevProvider {
   const explicit = (env.JEV_PROVIDER ?? "auto").toLowerCase();
@@ -243,9 +304,10 @@ export async function askJev(
   const provider = resolve(process.env);
 
   if (provider === "typesafe") {
-    typesafeClient ??= new TypeSafeClient(
-      process.env.TYPESAFE_BASE_URL ? { baseURL: process.env.TYPESAFE_BASE_URL } : undefined,
-    );
+    typesafeClient ??= new TypeSafeClient({
+      ...(process.env.TYPESAFE_BASE_URL ? { baseURL: process.env.TYPESAFE_BASE_URL } : undefined),
+      fetch: typesafeFetch,
+    });
     const response = await (
       typesafeClient.systemOne as unknown as (
         payload: { state: unknown; questions: Record<string, unknown>; model?: string },
@@ -268,7 +330,7 @@ export async function askJev(
     const slug = effective.startsWith("typesafe/") ? effective : `typesafe/${effective}`;
     const deadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetchWithResilience("https://openrouter.ai/api/alpha/decisions", {
+      const response = await fetchWithResilience(`${process.env.JEV_OPENROUTER_BASE_URL || "https://openrouter.ai/api"}/alpha/decisions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
@@ -383,28 +445,23 @@ export async function askJev(
   // Cloudflare Workers AI wraps the same contract in {model, input} and the
   // v4 {result, success} envelope. Single alias; no version pinning.
   const cfSlug = model.startsWith("typesafe/") ? model : `typesafe/${model === "jev-latest" ? "jev" : model}`;
+  const cfToken = process.env.JEV_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
+  const cfBase = process.env.JEV_CLOUDFLARE_BASE_URL || "https://api.cloudflare.com/client/v4";
   const cfDeadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
   let cfBody: Record<string, any>;
   let cfStatus = 0;
   try {
-    const cfResponse = await fetchWithResilience(
-      `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.JEV_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ model: cfSlug, input: { state, questions } }),
+    const cfResponse = await fetchWithResilience(`${cfBase}/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.JEV_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN}`,
+        "Content-Type": "application/json",
       },
-      cfDeadline,
-    );
+      body: JSON.stringify({ model: cfSlug, input: { state, questions } }),
+    }, cfDeadline);
     cfStatus = cfResponse.status;
-    // Redact the token before the body becomes MCP-visible error text; a
-    // reflecting endpoint would otherwise echo it back (error paths only, so
-    // legitimate answer values are never rewritten).
-    const cfToken = process.env.JEV_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
-    cfBody = JSON.parse(cfStatus >= 400 ? redactSecret(await readBodyBounded(cfResponse, cfDeadline), cfToken) : await readBodyBounded(cfResponse, cfDeadline));
+    const bodyText = await readBodyBounded(cfResponse, cfDeadline);
+    cfBody = JSON.parse(cfStatus >= 400 ? redactSecret(bodyText, cfToken) : bodyText);
   } catch (error) {
     if (error instanceof SyntaxError) {
       cfBody = {} as Record<string, any>; // parse failures never retry; surface as invalid response
@@ -414,14 +471,18 @@ export async function askJev(
   } finally {
     cfDeadline.dispose();
   }
-  const cfToken = process.env.JEV_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
+  // One redacted formatter for every Cloudflare error path (HTTP status,
+  // success:false, non-Completed state): a reflecting endpoint must never echo
+  // the token into MCP-visible error text, on any of the three.
+  const cfError = (detail: string) =>
+    new Error(`Cloudflare AI run ${cfStatus}: ${redactSecret(detail, cfToken).slice(0, 200)}`);
   if (cfStatus >= 400 || cfBody.success === false) {
-    throw new Error(`Cloudflare AI run ${cfStatus}: ${redactSecret(JSON.stringify(cfBody.errors ?? cfBody), cfToken).slice(0, 200)}`);
+    throw cfError(JSON.stringify(cfBody.errors ?? cfBody));
   }
   // The v4 envelope double-nests: body.result.result holds the model output.
   const cfOuter = cfBody.result;
   if (cfOuter && typeof cfOuter.state === "string" && cfOuter.state !== "Completed") {
-    throw new Error(`Cloudflare AI run state ${cfOuter.state}: ${JSON.stringify(cfBody.errors ?? []).slice(0, 200)}`);
+    throw cfError(`state ${cfOuter.state}: ${JSON.stringify(cfBody.errors ?? [])}`);
   }
   const cfPayload = cfOuter?.result ?? cfOuter ?? cfBody;
   return {

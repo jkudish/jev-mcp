@@ -26,7 +26,7 @@
     "build": "tsc",
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/unit.test.mjs test/mock.test.mjs test/provider.test.mjs",
+    "test": "node --test test/unit.test.mjs test/mock.test.mjs test/provider.test.mjs test/typesafe-abort-regression.test.mjs",
     "test:e2e": "node --test test/e2e.test.mjs"
   },
   "keywords": [
@@ -43,8 +43,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
     "@typesafe-ai/sdk": "^0.6.0",
-    "zod": "^3.25.0",
-    "ai": "^7.0.105"
+    "ai": "^7.0.105",
+    "undici": "^7.29.1",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
