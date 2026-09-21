@@ -83,9 +83,18 @@ export function adaptVercelAnswers(result: {
     if (answer?.type === "boolean") {
       adapted[id] = { type: "noul", noul: answer.probability };
     } else if (answer?.type === "choice") {
-      adapted[id] = { type: "choice", choice: answer.choice, probabilities: answer.probabilities ?? {}, confidence: confidence[id] ?? null };
+      // A distribution the upstream answer did not carry stays absent rather
+      // than becoming {}: score tools treat an absent distribution as "not
+      // reported" (still valid) and a present-but-malformed one as invalid;
+      // choice tools require a distribution, so absence and {} both fail
+      // their validation identically either way.
+      adapted[id] = answer.probabilities != null
+        ? { type: "choice", choice: answer.choice, probabilities: answer.probabilities, confidence: confidence[id] ?? null }
+        : { type: "choice", choice: answer.choice, confidence: confidence[id] ?? null };
     } else if (answer?.type === "score") {
-      adapted[id] = { type: "score", score: answer.score, probabilities: answer.probabilities ?? {}, confidence: confidence[id] ?? null };
+      adapted[id] = answer.probabilities != null
+        ? { type: "score", score: answer.score, probabilities: answer.probabilities, confidence: confidence[id] ?? null }
+        : { type: "score", score: answer.score, confidence: confidence[id] ?? null };
     } else {
       adapted[id] = answer;
     }

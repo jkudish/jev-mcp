@@ -39,6 +39,7 @@ import {
   MAX_CANDIDATES,
   MAX_CANDIDATE_CHARS,
   PROBABILITY_SUM_TOLERANCE,
+  SCORE_MEAN_TOLERANCE,
   MAX_GATE_CLAIMS,
   MAX_GATE_EVIDENCE_CHARS,
   MAX_GATE_EVIDENCE_ITEMS,
@@ -1166,14 +1167,42 @@ function reviewQuestions(extraFraming = ""): Record<string, unknown> {
 
 // Score contract: a finite score within the 0..2 rubric and confidence finite
 // or null. Malformed responses are never semantic outcomes.
-function validateScoreAnswer(answer: unknown): { score: number; confidence: number | null } | null {
-  const a = answer as { score?: unknown; confidence?: unknown } | null | undefined;
+// Score questions always offer exactly three options (0, 1, 2).
+const SCORE_OPTION_KEYS = ["0", "1", "2"] as const;
+
+// Score contract: a finite 0..2 score, plus, when a distribution is present
+// at all, an exact three-key distribution over the option scores summing to
+// one whose expected value matches the reported score. A distribution the
+// provider did not report stays null (still valid); a malformed or
+// contradictory one invalidates the answer.
+function validateScoreAnswer(answer: unknown): {
+  score: number;
+  confidence: number | null;
+  probabilities: Record<string, number> | null;
+} | null {
+  const a = answer as { score?: unknown; confidence?: unknown; probabilities?: unknown } | null | undefined;
   if (!a || typeof a.score !== "number" || !Number.isFinite(a.score) || a.score < 0 || a.score > 2) return null;
   const confidence =
     typeof a.confidence === "number" && Number.isFinite(a.confidence) && a.confidence >= 0 && a.confidence <= 1
       ? a.confidence
       : null;
-  return { score: a.score, confidence };
+  if (a.probabilities == null) return { score: a.score, confidence, probabilities: null };
+  if (!isRecord(a.probabilities)) return null;
+  const probabilities = a.probabilities as Record<string, number>;
+  const keys = Object.keys(probabilities);
+  const values = Object.values(probabilities);
+  const expected = new Set<string>(SCORE_OPTION_KEYS);
+  if (
+    keys.length !== expected.size ||
+    !keys.every((key) => expected.has(key)) ||
+    !values.every((p) => typeof p === "number" && Number.isFinite(p) && p >= 0 && p <= 1) ||
+    Math.abs(values.reduce((x, y) => x + y, 0) - 1) > PROBABILITY_SUM_TOLERANCE
+  ) {
+    return null;
+  }
+  const mean = SCORE_OPTION_KEYS.reduce((sum, key) => sum + Number(key) * probabilities[key], 0);
+  if (Math.abs(mean - a.score) > SCORE_MEAN_TOLERANCE) return null;
+  return { score: a.score, confidence, probabilities };
 }
 
 // Choice contract: exact candidate keys, finite [0,1] probabilities summing
@@ -1219,19 +1248,21 @@ function projectReviewHalf(
   action: "auto" | "review" | "escalate";
   composite: number | null;
   status?: "invalid_response";
+  reason_codes: string[];
+  limiting_rubrics: string[];
   safe_to_apply: number | null;
-  scores: Record<string, { score: number | null; confidence: number | null; status?: "invalid_response" }>;
+  scores: Record<string, { score: number | null; confidence: number | null; probabilities: Record<string, number> | null; status?: "invalid_response" }>;
   weights: Record<string, number>;
   thresholds: { auto_accept: number; review_at: number; composite_floor: number };
 } {
   const rubrics = ["correctness", "spec_match", "test_gap", "blast_radius"] as const;
-  const scores: Record<string, { score: number | null; confidence: number | null; status?: "invalid_response" }> = {};
+  const scores: Record<string, { score: number | null; confidence: number | null; probabilities: Record<string, number> | null; status?: "invalid_response" }> = {};
   const valid: Record<string, { score: number; confidence: number | null }> = {};
   let invalid = false;
   for (const key of rubrics) {
     const parsed = validateScoreAnswer(answers[key]);
     if (!parsed) {
-      scores[key] = { score: null, confidence: null, status: "invalid_response" };
+      scores[key] = { score: null, confidence: null, probabilities: null, status: "invalid_response" };
       invalid = true;
     } else {
       scores[key] = parsed;
@@ -1249,8 +1280,27 @@ function projectReviewHalf(
   };
 
   if (invalid) {
-    return { ...base, action: "escalate" as const, status: "invalid_response" as const, composite: null };
+    return {
+      ...base,
+      action: "escalate" as const,
+      status: "invalid_response" as const,
+      composite: null,
+      reason_codes: ["invalid_response"],
+      limiting_rubrics: [],
+    };
   }
+  // Per-rubric favorability: the normalized 0..1 contribution each rubric
+  // makes to the composite (test gap and blast radius inverted), used to name
+  // the limiting rubric(s) when the composite is what blocks auto.
+  const favorability: Record<string, number> = {
+    correctness: valid.correctness.score / 2,
+    spec_match: valid.spec_match.score / 2,
+    test_gap: 1 - valid.test_gap.score / 2,
+    blast_radius: 1 - valid.blast_radius.score / 2,
+  };
+  const favorabilities = rubrics.map((r) => favorability[r]);
+  const minFavorability = Math.min(...favorabilities);
+
   const composite = reviewComposite({
     correctness: valid.correctness.score,
     specMatch: valid.spec_match.score,
@@ -1261,11 +1311,40 @@ function projectReviewHalf(
   // number that can satisfy a threshold (a bare zero would, at auto_accept 0).
   const rubricConfidences = rubrics.map((r) => valid[r].confidence);
   const minConfidence = rubricConfidences.some((c) => c === null) ? null : (Math.min(...(rubricConfidences as number[])) as number);
-  const action = requireCompleteContext(
-    reviewAction({ composite, safeToApply: safeToApply!, minConfidence, ...thresholds }),
-    truncated,
-  );
-  return { ...base, action, composite };
+  const rawAction = reviewAction({ composite, safeToApply: safeToApply!, minConfidence, ...thresholds });
+  const action = requireCompleteContext(rawAction, truncated);
+
+  // Reason codes cover every action path; limiting_rubrics names the rubric(s)
+  // that bound the decision: the null-confidence ones when confidence is
+  // unknown, every rubric tied at the minimum confidence when confidence is
+  // what blocks, and every rubric tied at the minimum favorability when the
+  // composite floor is what blocks (ties always included, never a lone winner).
+  const reasonCodes: string[] = [];
+  let limitingRubrics: string[] = [];
+  if (minConfidence === null) {
+    reasonCodes.push("unknown_confidence");
+    limitingRubrics = rubrics.filter((r) => valid[r].confidence === null);
+  } else if (minConfidence < thresholds.reviewAt) {
+    reasonCodes.push("confidence_below_review");
+    limitingRubrics = rubrics.filter((r) => valid[r].confidence === minConfidence);
+  }
+  if (safeToApply !== null && safeToApply < thresholds.reviewAt) reasonCodes.push("safe_to_apply_below_review");
+  if (rawAction !== "escalate") {
+    if (safeToApply !== null && safeToApply < thresholds.autoAccept) reasonCodes.push("safe_to_apply_below_auto_accept");
+    if (minConfidence !== null && minConfidence < thresholds.autoAccept) {
+      reasonCodes.push("confidence_below_auto_accept");
+      if (limitingRubrics.length === 0) limitingRubrics = rubrics.filter((r) => valid[r].confidence === minConfidence);
+    }
+    if (composite < thresholds.compositeFloor) {
+      reasonCodes.push("composite_below_floor");
+      // Tolerant equality: complementary scores (0.6 vs 1.4) are
+      // mathematically tied but differ by a float ulp after inversion.
+      if (limitingRubrics.length === 0) limitingRubrics = rubrics.filter((r) => Math.abs(favorability[r] - minFavorability) <= 1e-12);
+    }
+  }
+  if (truncated) reasonCodes.push("incomplete_context");
+  if (action === "auto") reasonCodes.push("accepted");
+  return { ...base, action, composite, reason_codes: reasonCodes, limiting_rubrics: limitingRubrics };
 }
 
 server.registerTool(
@@ -1478,6 +1557,12 @@ server.registerTool(
     const reasonCodes: string[] = [];
     if (truncated) reasonCodes.push("incomplete_context");
     if (review.status === "invalid_response" || verification.summary.invalid_response > 0) reasonCodes.push("invalid_response");
+    // The review half's specific reason codes (unknown confidence, threshold
+    // and composite misses, safe_to_apply) surface at the top level too, so a
+    // gate consumer never has to open review.reason_codes to learn why.
+    for (const code of review.reason_codes) {
+      if (code !== "invalid_response" && code !== "incomplete_context" && code !== "accepted") reasonCodes.push(code);
+    }
     if (review.action === "escalate") reasonCodes.push("review_escalated");
     if (review.action === "review") reasonCodes.push("review_required");
     if (verification.summary.contradicted > 0) reasonCodes.push("claims_contradicted");
