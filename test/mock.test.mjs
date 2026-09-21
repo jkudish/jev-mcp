@@ -1168,3 +1168,28 @@ test("jev_verify validates source answers against supplied evidence ids", async 
     });
   }
 });
+
+test("mathematically exact 0.01 sum deltas survive float comparison", async () => {
+  // 0.33 + 0.33 + 0.33 = 0.99, and |0.99 - 1| computes to 0.010000000000000009,
+  // which compares greater than a bare 0.01 in IEEE-754. The shared
+  // PROBABILITY_SUM_TOLERANCE must accept such distributions.
+  await checkAnswer("jev_verify", VERIFY_ARGS, {
+    relation_claim0: { choice: "supports", confidence: null, probabilities: { supports: 0.33, contradicts: 0.33, says_nothing: 0.33 } },
+  }, (body) => {
+    assert.equal(body.results[0].status, undefined);
+    assert.equal(body.results[0].verdict, "verified");
+  });
+  await checkAnswer("jev_classify", {
+    items: [{ id: "x", text: "hello" }],
+    classes: [
+      { id: "a", description: "greeting" },
+      { id: "b", description: "farewell" },
+      { id: "c", description: "other" },
+    ],
+  }, {
+    i0: { choice: "c0", probabilities: { c0: 0.33, c1: 0.33, c2: 0.33 } },
+  }, (body) => {
+    assert.equal(body.results[0].status, undefined);
+    assert.equal(body.results[0].classification, "a");
+  });
+});
