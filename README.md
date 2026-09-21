@@ -626,6 +626,12 @@ Jev is TypeSafe's System One model: it returns typed answers with calibrated pro
 | `JEV_MCP_MODEL` | `jev-latest` | Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
 | `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
 | `JEV_API_BASE_URL` + `JEV_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `JEV_PROVIDER=compatible`. `JEV_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
+| `JEV_MCP_REQUEST_TIMEOUT_MS` | `60000` | Whole-request deadline in milliseconds, covering every attempt, on the fetch-based transports. |
+| `JEV_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on the fetch-based transports; retries happen only on 408, 409, 429, and 5xx. |
+
+### Transport resilience
+
+The fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpoint) retry only statuses that mean the request was not processed (408, 409, 429, 5xx), with jittered exponential backoff, at most `JEV_MCP_MAX_ATTEMPTS` total attempts, all inside one `JEV_MCP_REQUEST_TIMEOUT_MS` deadline. Everything else fails immediately: caller cancellations, deadline expiry, non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request and is never re-sent. Error bodies on those transports are redacted, so a reflecting endpoint can never echo a configured key into MCP-visible errors. The typesafe and vercel transports go through their SDKs, whose retry and timeout semantics are theirs; no uniformity is claimed for them. Research and the original report: [issue #23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.
 
 ### Vercel
 
