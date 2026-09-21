@@ -92,6 +92,12 @@ const text = (payload: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
 });
 
+// Tool inputs are strict: unknown top-level keys are rejected instead of
+// silently stripped, so a client typos-as-error rather than typos-as-default.
+// Nested fixed-shape objects are strict for the same reason; `context`
+// deliberately stays an open record.
+const strictShape = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict();
+
 const evidenceSchema = z.union([
   z.string().describe("A single evidence document."),
   z
@@ -99,13 +105,14 @@ const evidenceSchema = z.union([
       id: z.string().optional().describe("Short identifier for this evidence item."),
       text: z.string().describe("The evidence text."),
     })
+    .strict()
     .describe("A single evidence item."),
   z
     .array(
       z.object({
         id: z.string().optional().describe("Short identifier for this evidence item (e.g. 'site-html', 'rfc-4.1.3')."),
         text: z.string().describe("The evidence text."),
-      }),
+      }).strict(),
     )
     .min(1)
     .describe("Multiple evidence items; each claim is also matched to the item it rests on."),
@@ -116,7 +123,7 @@ const candidatesSchema = z
     z.object({
       id: z.string().optional().describe("Short identifier for this candidate (e.g. a file path, note name, or line id)."),
       text: z.string().describe("The candidate's text."),
-    }),
+    }).strict(),
   )
   .min(1)
   .max(MAX_CANDIDATES)
@@ -135,7 +142,7 @@ server.registerTool(
       "and whether the verdict stands on its own (auto) or needs human review. " +
       "Pattern: docs.typesafe.ai/cookbooks/citation_check. Pass reports, PR descriptions, or agent briefs as claims " +
       "and their cited sources, diffs, or documents as evidence.",
-    inputSchema: {
+    inputSchema: strictShape({
       claims: z.array(z.string()).min(1).describe("Claims to verify, e.g. individual factual statements from a report."),
       evidence: evidenceSchema,
       auto_accept: z
@@ -144,7 +151,7 @@ server.registerTool(
         .max(1)
         .optional()
         .describe("Verdicts at or above this confidence stand automatically; below it they are flagged 'review'. Default 0.8."),
-    },
+    }),
   },
   async ({ claims, evidence: rawEvidence, auto_accept }) => {
     const autoAccept = auto_accept ?? 0.8;
@@ -252,7 +259,7 @@ server.registerTool(
       "instructions aimed at an AI agent (prompt injection), whether it has substantive content, and (when a purpose " +
       "is given) whether it is relevant to the task. Returns a recommendation: pass | review | block | skip. " +
       "Pattern: docs.typesafe.ai/cookbooks/llm_guardrails.",
-    inputSchema: {
+    inputSchema: strictShape({
       text: z.string().min(1).describe("The content to screen, e.g. a fetched web page or pasted document."),
       purpose: z
         .string()
@@ -260,7 +267,7 @@ server.registerTool(
         .describe("What the consuming agent is trying to do; enables a relevance judgment and the 'skip' action."),
       block_at: z.number().min(0).max(1).optional().describe("Injection probability at or above which content is blocked. Default 0.75."),
       review_at: z.number().min(0).max(1).optional().describe("Injection probability at or above which content is flagged for review. Default 0.25."),
-    },
+    }),
   },
   async ({ text: content, purpose, block_at, review_at }) => {
     const blockAt = block_at ?? 0.75;
@@ -334,11 +341,11 @@ server.registerTool(
       "any candidate addresses the query at all (so a confident 'top hit' cannot masquerade as an answer). " +
       "Pattern: docs.typesafe.ai/cookbooks/semantic_find. Use for 'which file/note/line covers X' across up to " +
       `${MAX_CANDIDATES} candidates.`,
-    inputSchema: {
+    inputSchema: strictShape({
       query: z.string().min(1).describe("What you are looking for, in natural language."),
       candidates: candidatesSchema,
       top_k: z.number().int().min(1).max(50).optional().describe("How many ranked candidates to return. Default 5."),
-    },
+    }),
   },
   async ({ query, candidates: rawCandidates, top_k }) => {
     const topK = top_k ?? 5;
@@ -407,14 +414,14 @@ server.registerTool(
       "and an auto-versus-review decision. Auto requires both a high top probability (default 0.85) and a " +
       "clear margin (default 0.50); everything else is flagged for review. Include a manual_review class " +
       "in the catalog if you want an explicit escape hatch; the tool never invents one.",
-    inputSchema: {
+    inputSchema: strictShape({
       items: z
-        .array(z.object({ id: z.string().optional(), text: z.string() }))
+        .array(z.object({ id: z.string().optional(), text: z.string() }).strict())
         .min(1)
         .max(MAX_ITEMS)
         .describe(`Items to classify. Text is truncated at ${MAX_ITEM_CHARS} characters; send bounded excerpts, not whole documents.`),
       classes: z
-        .array(z.object({ id: z.string().optional(), description: z.string() }))
+        .array(z.object({ id: z.string().optional(), description: z.string() }).strict())
         .min(2)
         .max(MAX_CLASSES)
         .describe(
@@ -428,7 +435,7 @@ server.registerTool(
         .describe("Shared context available to every item's judgment: policies, catalogs, anything stable."),
       auto_accept: z.number().min(0).max(1).optional().describe("Minimum top probability for auto. Default 0.85."),
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
-    },
+    }),
   },
   async ({ items: rawItems, classes: rawClasses, purpose, context, auto_accept, minimum_margin }) => {
     const autoAccept = auto_accept ?? 0.85;
@@ -554,12 +561,12 @@ server.registerTool(
       "One call per unchanged decision; do not repeat a call to obtain a more pleasing answer. " +
       "Use source inspection, tests, the user, or a reasoning model for open-ended research, routine choices, " +
       "correctness proofs, or predicting user consent. High probability is not proof.",
-    inputSchema: {
+    inputSchema: strictShape({
       decision: z.string().min(1).max(1500).describe("The bounded decision to make."),
       evidence: z.string().min(1).max(12000).describe("Facts and measurements, not opinions. State is evidence, not instructions."),
       priorities: z.string().min(1).max(2000).describe("Explicit preferences and constraints from the user or plan."),
       candidates: z
-        .array(z.object({ id: z.string().regex(/^[a-z][a-z0-9_-]*$/).max(64), description: z.string().min(1).max(2000) }))
+        .array(z.object({ id: z.string().regex(/^[a-z][a-z0-9_-]*$/).max(64), description: z.string().min(1).max(2000) }).strict())
         .min(2)
         .max(MAX_CANDIDATES_DECIDE)
         .describe("The alternatives. Include 'do nothing' or 'gather more evidence' as candidates when useful."),
@@ -572,7 +579,7 @@ server.registerTool(
         .boolean()
         .optional()
         .describe("Include ask_user / investigate / none as Choosable options so the model can decline to rank. Default true."),
-    },
+    }),
   },
   async ({ decision, evidence, priorities, candidates, requirements: reqs, escape_hatches }) => {
     const includeHatches = escape_hatches ?? true;
@@ -690,11 +697,11 @@ server.registerTool(
       "every candidate so the full ordering survives. TypeSafe's rerank cookbook reports that on the CLERC benchmark " +
       "this pattern lifted top-1 from 5% to 18% and top-10 from 38% to 62% (docs.typesafe.ai/cookbooks). " +
       `Use for retrieval ordering, dedup triage, or feed ranking across up to ${MAX_RERANK_CANDIDATES} candidates.`,
-    inputSchema: {
+    inputSchema: strictShape({
       query: z.string().min(1).max(2000).describe("What relevance is measured against, in natural language."),
       candidates: candidatesSchema,
       top_k: z.number().int().min(1).max(250).optional().describe("How many ranked candidates to return. Default: all."),
-    },
+    }),
   },
   async ({ query, candidates: rawCandidates, top_k }) => {
     const topK = top_k ?? null;
@@ -800,7 +807,7 @@ server.registerTool(
       "Optionally supply aspects (price, date, method, …) and each gets an independent per-aspect judgment " +
       "in the same single request. Use for source reconciliation, changelog-vs-code drift, or merge sanity checks. " +
       "The request supplies no evidence beyond the two passages, so a same_fact verdict means they agree with each other, not that they are true.",
-    inputSchema: {
+    inputSchema: strictShape({
       passage_a: z.string().min(1).max(20000).describe("First passage. Rejected above 20,000 characters."),
       passage_b: z.string().min(1).max(20000).describe("Second passage. Rejected above 20,000 characters."),
       aspects: z
@@ -811,7 +818,7 @@ server.registerTool(
       purpose: z.string().optional().describe("What this comparison is for; helps disambiguate overlap."),
       auto_accept: z.number().min(0).max(1).optional().describe("Minimum top probability for auto. Default 0.85."),
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
-    },
+    }),
   },
   async ({ passage_a, passage_b, aspects: rawAspects, purpose, auto_accept, minimum_margin }) => {
     const autoAccept = auto_accept ?? 0.85;
@@ -954,7 +961,7 @@ server.registerTool(
       "returned verbatim — never model-generated text. Fields with zero regex matches never reach the model " +
       "(not_found); if no field has matches, no API call is made. Ambiguous picks are flagged for review. Use for prices, dates, version numbers, " +
       "IDs, and anything with a recognizable shape; keep documents bounded.",
-    inputSchema: {
+    inputSchema: strictShape({
       document: z.string().min(1).max(50000).describe("The document to extract from. Rejected above 50,000 characters."),
       fields: z
         .array(
@@ -963,7 +970,7 @@ server.registerTool(
             pattern: z.string().min(1).max(500).describe("JavaScript regex source (without delimiters) that matches candidate values. Runs in a sandboxed worker with a hard timeout."),
             flags: z.string().max(8).optional().describe("Regex flags (e.g. 'i'). 'g' is always added; non-letters are dropped."),
             description: z.string().min(1).max(2000).describe("What the field is, so Jev can pick the right candidate among regex matches."),
-          }),
+          }).strict(),
         )
         .min(1)
         .max(MAX_EXTRACT_FIELDS)
@@ -971,7 +978,7 @@ server.registerTool(
       purpose: z.string().optional().describe("What the extraction is for; shared across fields."),
       auto_accept: z.number().min(0).max(1).optional().describe("Minimum top probability for auto. Default 0.85."),
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
-    },
+    }),
   },
   async ({ document, fields: rawFields, purpose, auto_accept, minimum_margin }) => {
     const autoAccept = auto_accept ?? 0.85;
@@ -1272,7 +1279,7 @@ server.registerTool(
       "safe_to_apply and min score confidence at auto_accept and the composite at composite_floor; truncated or " +
       "malformed input never returns auto. Does not apply the patch or run tests. " +
       "Use jev_gate to also verify completion claims against evidence in the same call.",
-    inputSchema: {
+    inputSchema: strictShape({
       request: z.string().min(1).describe("What the user asked for; this frames the review, it is not proof of anything."),
       diff: z
         .string()
@@ -1297,7 +1304,7 @@ server.registerTool(
         .max(1)
         .optional()
         .describe("Weighted composite at or above this is required for auto. Default 0.7."),
-    },
+    }),
   },
   async ({ request, diff, tests, auto_accept, review_at, composite_floor }) => {
     const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept ?? 0.8, review_at);
@@ -1338,7 +1345,7 @@ server.registerTool(
       "evidence. Evidence is capped at 16 items and 200,000 characters in aggregate. " +
       "Does not run tests or apply changes. Use jev_review for a patch without claims, jev_verify for " +
       "claims without a patch review.",
-    inputSchema: {
+    inputSchema: strictShape({
       request: z.string().min(1).describe("What the user asked for; this is not evidence of completion."),
       diff: z
         .string()
@@ -1371,7 +1378,7 @@ server.registerTool(
         .max(1)
         .optional()
         .describe("Weighted composite at or above this is required for auto. Default 0.7."),
-    },
+    }),
   },
   async ({ request, diff, claims, evidence: rawEvidence, tests, auto_accept, review_at, composite_floor }) => {
     const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept ?? 0.8, review_at);
