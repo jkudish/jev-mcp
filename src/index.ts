@@ -437,7 +437,8 @@ server.registerTool(
         keys.length >= expected.size &&
         keys.every((k) => expected.has(k)) &&
         values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) &&
-        Math.abs(sum - 1) <= 0.01;
+        Math.abs(sum - 1) <= 0.01 &&
+        !(probabilities[answer.choice] < Math.max(...values) - 1e-9);
 
       if (!valid) {
         return {
