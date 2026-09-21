@@ -364,11 +364,13 @@ test("deadline expiry during retry backoff surfaces promptly without another att
     {},
     async (client, requests) => {
       // Measured from just before the call, so spawn time cannot eat the
-      // budget. With a 300ms deadline, the abort-aware backoff ends inside
-      // the deadline (at most a second, instantly-aborted request when the
-      // first jittered sleep 250-500ms resolves first). A regression to a
-      // plain sleep would run sleep1 + sleep2 (750ms+ of backoff alone)
-      // and typically reach a third request, tripping both assertions.
+      // budget. With a 300ms deadline, the abort-aware backoff ends at the
+      // deadline, with at most one instantly-aborted extra request when the
+      // first jittered sleep (250-500ms) resolves before it. Probabilistic,
+      // not airtight: if that sleep outlasts the deadline, a plain-sleep
+      // regression would also finish fast with two requests. The other half
+      // of the jitter range chains sleep1 + sleep2 (750ms of backoff alone),
+      // tripping both this bound and the request count.
       const started = Date.now();
       const result = await client.callTool({
         name: "jev_verify",
