@@ -629,37 +629,16 @@ server.registerTool(
     const expectedRecKeys = new Set([...candidateKeys.map((c) => c.key), ...(includeHatches ? Object.keys(DECIDE_ESCAPE_HATCHES) : [])]);
     const expectedCheckKeys = new Set(["supported", "contradicted", "unknown"]);
 
-    // classify-grade validation: exact keys, finite [0,1] probabilities summing
-    // to one, chosen key is the argmax, confidence finite or null. Malformed
-    // responses are never semantic outcomes.
-    const validateChoice = (answer: any, expected: Set<string>) => {
-      if (!answer || typeof answer.choice !== "string" || !expected.has(answer.choice)) return null;
-      const probabilities: Record<string, number> = answer.probabilities ?? {};
-      const keys = Object.keys(probabilities);
-      const values = Object.values(probabilities);
-      if (
-        keys.length !== expected.size ||
-        !keys.every((k) => expected.has(k)) ||
-        !values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) ||
-        Math.abs(values.reduce((a: number, b: number) => a + b, 0) - 1) > 0.01 ||
-        // Choice contract: the chosen option must be the argmax.
-        probabilities[answer.choice] < Math.max(...values) - 1e-9
-      )
-        return null;
-      const rawConfidence = answer.confidence;
-      const confidence =
-        typeof rawConfidence === "number" && Number.isFinite(rawConfidence) && rawConfidence >= 0 && rawConfidence <= 1
-          ? rawConfidence
-          : null;
-      return { choice: answer.choice, confidence, probabilities };
-    };
-
-    const rec = validateChoice(answers.recommendation, expectedRecKeys);
+    // classify-grade validation via the shared validateChoiceAnswer: exact
+    // keys, finite [0,1] probabilities summing to one within the shared
+    // tolerance, chosen key is the argmax, confidence finite or null.
+    // Malformed responses are never semantic outcomes.
+    const rec = validateChoiceAnswer(answers.recommendation, expectedRecKeys);
     const recProbabilities: Record<string, number> = rec?.probabilities ?? {};
     const recommendedKey = rec?.choice ?? null;
     const checks = candidateKeys.flatMap((c, i) =>
       requirements.map((_, j) => {
-        const answer = validateChoice(answers[`check_${i}_${j}`], expectedCheckKeys);
+        const answer = validateChoiceAnswer(answers[`check_${i}_${j}`], expectedCheckKeys);
         return { candidate: c.id, requirement: j, answer: answer?.choice ?? "invalid_response" };
       }),
     );
@@ -859,30 +838,11 @@ server.registerTool(
     const { answers, usage, provider, model } = await askJev(state, questions);
 
     const expected = new Set(Object.keys(COMPARE_RELATIONS));
-    const validateChoice = (answer: unknown) => {
-      if (!answer || typeof (answer as any).choice !== "string" || !expected.has((answer as any).choice)) return null;
-      const probabilities: Record<string, number> = (answer as any).probabilities ?? {};
-      const keys = Object.keys(probabilities);
-      const values = Object.values(probabilities);
-      if (
-        keys.length !== expected.size ||
-        !keys.every((k) => expected.has(k)) ||
-        !values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) ||
-        Math.abs(values.reduce((x, y) => x + y, 0) - 1) > 0.01 ||
-        // Choice contract: the chosen option must be the argmax.
-        probabilities[(answer as any).choice] < Math.max(...values) - 1e-9
-      )
-        return null;
-      const rawConfidence = (answer as any).confidence;
-      const confidence =
-        typeof rawConfidence === "number" && Number.isFinite(rawConfidence) && rawConfidence >= 0 && rawConfidence <= 1
-          ? rawConfidence
-          : null;
-      return { choice: (answer as any).choice, confidence, probabilities };
-    };
 
+    // classify-grade validation via the shared validateChoiceAnswer; the
+    // overall and aspect questions share the same three relation keys.
     const shape = (raw: unknown) => {
-      const answer = validateChoice(raw);
+      const answer = validateChoiceAnswer(raw, expected);
       if (!answer) {
         return {
           relation: null,
@@ -1473,32 +1433,13 @@ server.registerTool(
 
     const review = projectReviewHalf(answers, { autoAccept, reviewAt, compositeFloor }, truncated);
 
-    // classify-grade validation: exact keys, finite [0,1] probabilities summing
-    // to one, chosen key is the argmax, confidence finite or null.
+    // classify-grade validation via the shared validateChoiceAnswer: exact
+    // keys, finite [0,1] probabilities summing to one within the shared
+    // tolerance, chosen key is the argmax, confidence finite or null.
     const expectedClaimKeys = new Set(Object.keys(VERIFY_CLAIM_CRITERIA));
-    const validateChoice = (answer: any) => {
-      if (!answer || typeof answer.choice !== "string" || !expectedClaimKeys.has(answer.choice)) return null;
-      const probabilities: Record<string, number> = answer.probabilities ?? {};
-      const keys = Object.keys(probabilities);
-      const values = Object.values(probabilities);
-      if (
-        keys.length !== expectedClaimKeys.size ||
-        !keys.every((k) => expectedClaimKeys.has(k)) ||
-        !values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) ||
-        Math.abs(values.reduce((a: number, b: number) => a + b, 0) - 1) > 0.01 ||
-        probabilities[answer.choice] < Math.max(...values) - 1e-9
-      )
-        return null;
-      const rawConfidence = answer.confidence;
-      const confidence =
-        typeof rawConfidence === "number" && Number.isFinite(rawConfidence) && rawConfidence >= 0 && rawConfidence <= 1
-          ? rawConfidence
-          : null;
-      return { choice: answer.choice, confidence, probabilities };
-    };
 
     const results = claims.map((claim, i) => {
-      const answer = validateChoice(answers[`claim_${i}`]);
+      const answer = validateChoiceAnswer(answers[`claim_${i}`], expectedClaimKeys);
       if (!answer) {
         return {
           claim,
