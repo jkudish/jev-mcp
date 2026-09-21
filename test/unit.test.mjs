@@ -7,6 +7,7 @@ import {
   DECIDE_ESCAPE_HATCHES,
   ensureUniqueIds,
   existsVerdict,
+  isRecord,
   marginOf,
   MAX_CANDIDATES,
   MAX_CANDIDATES_DECIDE,
@@ -39,6 +40,18 @@ test("sanitizeId keeps safe characters and drops the rest", () => {
   assert.equal(sanitizeId("a".repeat(100)).length, 64);
 });
 
+
+test("isRecord accepts plain objects and rejects null, arrays, and primitives", () => {
+  assert.equal(isRecord({}), true);
+  assert.equal(isRecord({ answers: {} }), true);
+  assert.equal(isRecord(Object.create(null)), true);
+  assert.equal(isRecord([]), false);
+  assert.equal(isRecord(null), false);
+  assert.equal(isRecord(undefined), false);
+  assert.equal(isRecord("answers"), false);
+  assert.equal(isRecord(0), false);
+  assert.equal(isRecord(() => {}), false);
+});
 test("ensureUniqueIds assigns fallbacks and resolves collisions", () => {
   const { items, renamed } = ensureUniqueIds(
     [

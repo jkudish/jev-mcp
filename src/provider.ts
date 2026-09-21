@@ -5,6 +5,7 @@
 
 import { experimental_evaluate } from "ai";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
+import { isRecord } from "./lib.js";
 
 export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible";
 
@@ -17,11 +18,6 @@ export interface AskResult {
 
 const X_TITLE = "jev-mcp";
 const REFERER = "https://github.com/jkudish/jev-mcp";
-
-// A JSON object on the wire: present, non-null, and not an array.
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 // Replace every occurrence of the secret so a reflecting endpoint cannot leak
 // it into MCP-visible error text; covering the bare form also covers the

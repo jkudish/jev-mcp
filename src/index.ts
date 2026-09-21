@@ -29,6 +29,7 @@ import {
   ensureUniqueIds,
   existsVerdict,
   hasNonEmptyEvidence,
+  isRecord,
   marginOf,
   MAX_CANDIDATES_DECIDE,
   MAX_CLASSES,
@@ -178,7 +179,7 @@ server.registerTool(
     };
 
     const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
-    const answers = isAnswerRecord(rawAnswers) ? rawAnswers : {};
+    const answers: Record<string, any> = isRecord(rawAnswers) ? rawAnswers : {};
 
     const results = claimItems.map((claim) => {
       const relation = answers[`relation_${claim.id}`];
@@ -283,7 +284,7 @@ server.registerTool(
 
     const state = { content, purpose: purpose ?? null };
     const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
-    const answers = isAnswerRecord(rawAnswers) ? rawAnswers : {};
+    const answers: Record<string, any> = isRecord(rawAnswers) ? rawAnswers : {};
 
     const injection = validateNoulAnswer(answers.injection);
     const substance = validateNoulAnswer(answers.substance);
@@ -354,7 +355,7 @@ server.registerTool(
 
     const state = { query, candidates };
     const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
-    const answers = isAnswerRecord(rawAnswers) ? rawAnswers : {};
+    const answers: Record<string, any> = isRecord(rawAnswers) ? rawAnswers : {};
 
     const exists = validateNoulAnswer(answers.exists);
     const best = validateChoiceAnswer(answers.best, candidates.map((c) => c.id));
@@ -1166,20 +1167,16 @@ function validateScoreAnswer(answer: unknown): { score: number; confidence: numb
   return { score: a.score, confidence };
 }
 
-// API objects must be records, not null, arrays, or primitive values.
-function isAnswerRecord(value: unknown): value is Record<string, any> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 // Choice contract: exact candidate keys, finite [0,1] probabilities summing
 // to one within PROBABILITY_SUM_TOLERANCE, and a choice tied for the maximum
 // probability.
 function validateChoiceAnswer(answer: unknown, expectedKeys: Iterable<string>): {
   choice: string; probabilities: Record<string, number>; confidence: number | null;
 } | null {
-  if (!isAnswerRecord(answer) || typeof answer.choice !== "string" || !isAnswerRecord(answer.probabilities)) return null;
+  if (!isRecord(answer) || typeof answer.choice !== "string" || !isRecord(answer.probabilities)) return null;
   const expected = new Set(expectedKeys);
-  const probabilities: Record<string, number> = answer.probabilities;
+  // Shape is enforced by the isRecord guards above and the finite [0,1] check below.
+  const probabilities = answer.probabilities as Record<string, number>;
   const keys = Object.keys(probabilities);
   const values = Object.values(probabilities);
   if (
