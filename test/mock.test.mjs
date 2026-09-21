@@ -1132,3 +1132,39 @@ for (const answers of [undefined, null, [], "bad", 0, true]) {
     await checkAnswer("jev_verify", VERIFY_ARGS, answers, (body) => invalidClaim(body.results[0]));
   });
 }
+
+const TWO_EVIDENCE = [{ id: "a", text: "A" }, { id: "b", text: "B" }];
+const SOURCE_KEYS = ["a", "b", "none"];
+test("jev_verify validates source answers against supplied evidence ids", async () => {
+  const relation = pick("supports", RELATION_KEYS);
+  await checkAnswer("jev_verify", { ...VERIFY_ARGS, evidence: TWO_EVIDENCE }, {
+    relation_claim0: relation, source_claim0: pick("a", SOURCE_KEYS),
+  }, (body) => {
+    assert.equal(body.results[0].verdict, "verified");
+    assert.equal(body.results[0].supporting_evidence, "a");
+  });
+  await checkAnswer("jev_verify", { ...VERIFY_ARGS, evidence: TWO_EVIDENCE }, {
+    relation_claim0: relation, source_claim0: pick("none", SOURCE_KEYS),
+  }, (body) => {
+    assert.equal(body.results[0].verdict, "verified");
+    assert.equal(body.results[0].supporting_evidence, null);
+  });
+  const BAD_SOURCES = [
+    undefined, null, "a", {}, [],
+    { choice: "a" },
+    { choice: "alien", probabilities: { a: 1, b: 0, none: 0 } },
+    { choice: "a", probabilities: { a: 0.5, b: 0.5 } },
+    { choice: "a", probabilities: { a: 0.9, b: 0.9, none: 0 } },
+    { ...pick("a", SOURCE_KEYS), choice: 1 },
+  ];
+  for (const [i, source] of BAD_SOURCES.entries()) {
+    await checkAnswer("jev_verify", { ...VERIFY_ARGS, evidence: TWO_EVIDENCE }, {
+      relation_claim0: relation,
+      ...(source === undefined ? {} : { source_claim0: source }),
+    }, (body) => {
+      // A bad source never invalidates the relation; it just yields null.
+      assert.equal(body.results[0].verdict, "verified");
+      assert.equal(body.results[0].supporting_evidence, null, `case ${i}`);
+    });
+  }
+});

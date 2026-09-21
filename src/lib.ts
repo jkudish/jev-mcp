@@ -6,6 +6,10 @@ export const MAX_CANDIDATES = 250;
 /** Default per-candidate text cap (characters) to keep request size bounded. */
 export const MAX_CANDIDATE_CHARS = 2000;
 
+// Float-safe tolerance for probability-sum checks: a mathematically exact
+// 0.01 delta (e.g. a 0.99 sum) can compare greater than 0.01 in IEEE-754.
+export const PROBABILITY_SUM_TOLERANCE = 0.01 + 1e-12;
+
 /**
  * Sanitize a caller-supplied id into a safe Choice option key.
  * Keeps alphanumerics, underscore, dash and dot; collapses the rest.

@@ -166,7 +166,7 @@ Malformed or missing relation answers fail closed per claim (other valid claims 
 
 - Relation choices must belong to the requested set and be a maximum-probability option. Distributions must contain exactly all relation keys, with finite probabilities in `[0,1]` summing to 1 within `0.01`.
 - Missing or null confidence stays `null` and requires `review`, even with `auto_accept: 0`. Non-number, non-finite, or out-of-range confidence invalidates the claim and is returned as `null`; numeric zero is valid.
-- With multiple evidence items, each claim also gets the id of the evidence it rests on. These source answers are optional auxiliary information; missing sources yield `supporting_evidence: null` without invalidating a valid relation.
+- With multiple evidence items, each claim also gets the id of the evidence it rests on. These source answers are optional auxiliary information; missing sources yield `supporting_evidence: null` without invalidating a valid relation. A present source must be a well-formed choice over the evidence ids plus `none`; anything else yields `null`.
 - `auto_accept` (default `0.8`) is the confidence at or above which a verdict stands. Lower-confidence verdicts come back flagged `review`.
 - For quote-level citation checks, match quotes against the source in code first and send only the surviving claims. See the [citation-check cookbook](https://docs.typesafe.ai/cookbooks/citation_check).
 
