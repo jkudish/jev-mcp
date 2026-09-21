@@ -30,7 +30,12 @@ async function withClient(fn) {
   }
 }
 
+// Float-safe tolerance for probability-sum assertions: a mathematically exact
+// 0.01 delta (e.g. a 0.99 sum) can compare greater than 0.01 in IEEE-754.
+const PROBABILITY_SUM_TOLERANCE = 0.01 + 1e-12;
+
 function payload(result) {
+  assert.notEqual(result.isError, true, "tool returned an error");
   const block = result.content?.find((b) => b.type === "text");
   assert.ok(block, "tool returned no text content");
   return JSON.parse(block.text);
@@ -52,6 +57,93 @@ test("lists the ten tools", { skip: !hasKey }, async () => {
       "jev_screen",
       "jev_verify",
     ]);
+  });
+});
+
+test("jev_classify routes support tickets and preserves external ids", { skip: !hasKey }, async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "jev_classify",
+      arguments: {
+        items: [
+          { id: "refund", text: "I was charged twice. Please refund the duplicate payment." },
+          { id: "crash", text: "The application crashes on startup." },
+        ],
+        classes: [
+          { id: "billing", description: "Payments, invoicing, refunds, billing issues" },
+          { id: "technical", description: "Bugs, crashes, outages, software problems" },
+        ],
+        purpose: "Route support tickets",
+      },
+    });
+    const body = payload(result);
+    assert.equal(body.tool, "jev_classify");
+    assert.equal(body.results.length, 2);
+    assert.deepEqual(body.results.map((item) => item.id).sort(), ["crash", "refund"]);
+    const byId = Object.fromEntries(body.results.map((item) => [item.id, item]));
+    assert.equal(byId.refund.classification, "billing");
+    assert.equal(byId.crash.classification, "technical");
+    assert.equal(body.summary.invalid_response, 0);
+    for (const item of body.results) {
+      assert.deepEqual(Object.keys(item.probabilities).sort(), ["billing", "technical"]);
+      const values = Object.values(item.probabilities);
+      assert.ok(values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1));
+      assert.ok(Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) <= PROBABILITY_SUM_TOLERANCE);
+      const ranked = values.slice().sort((a, b) => b - a);
+      const selectedProbability = item.probabilities[item.classification];
+      assert.ok(selectedProbability >= ranked[0] - 1e-9);
+      assert.ok(Math.abs(item.top_probability - selectedProbability) <= 1e-9);
+      assert.ok(Math.abs(item.margin - (ranked[0] - ranked[1])) <= 1e-9);
+      assert.equal(
+        item.decision,
+        selectedProbability >= body.thresholds.auto_accept &&
+          ranked[0] - ranked[1] >= body.thresholds.minimum_margin ? "auto" : "review",
+      );
+    }
+  });
+});
+
+test("jev_decide selects the deployment that works offline", { skip: !hasKey }, async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "jev_decide",
+      arguments: {
+        decision: "Choose the deployment that satisfies the offline requirement",
+        candidates: [
+          { id: "local", description: "Runs entirely on the local machine" },
+          { id: "hosted", description: "Remote hosted API requiring network access" },
+        ],
+        // The tool accepts strings; preserve the evidence and priority ids as JSON.
+        evidence: JSON.stringify([
+          { id: "local-test", text: "Local deployment passed the offline test suite with no network access" },
+          { id: "hosted-docs", text: "Hosted deployment requires an internet connection at all times" },
+        ]),
+        priorities: JSON.stringify([
+          { id: "must-be-offline", text: "Must operate without any network access" },
+        ]),
+        requirements: ["Operates without network access"],
+      },
+    });
+    const body = payload(result);
+    assert.equal(body.tool, "jev_decide");
+    const recommendation = body.recommendation;
+    assert.equal(recommendation.selected, "local");
+    assert.equal(recommendation.escaped, false);
+    assert.equal(recommendation.status, undefined);
+    assert.deepEqual(
+      Object.keys(recommendation.probabilities).sort(),
+      ["ask_user", "hosted", "investigate", "local", "none"],
+    );
+    const values = Object.values(recommendation.probabilities);
+    assert.ok(values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1));
+    assert.ok(Math.abs(values.reduce((sum, p) => sum + p, 0) - 1) <= PROBABILITY_SUM_TOLERANCE);
+    assert.ok(recommendation.probabilities[recommendation.selected] >= Math.max(...values) - 1e-9);
+    assert.equal(body.requirements_checked, 1);
+    assert.ok(Array.isArray(body.checks));
+    const offlineCheck = body.checks.find((check) => check.candidate === "local" && check.requirement === 0);
+    assert.ok(offlineCheck, "missing offline requirement check for local deployment");
+    assert.equal(offlineCheck.answer, "supported");
+    assert.deepEqual(body.warnings, []);
   });
 });
 
