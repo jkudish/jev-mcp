@@ -1285,3 +1285,72 @@ test("jev_extract accepts a float-broken probability sum that the shared toleran
     assert.equal(body.results[0].value, "1.2.3");
   }, compatibleEnv);
 });
+
+test("unknown top-level input keys are rejected instead of silently stripped", async () => {
+  // Strict tool inputs: a misspelled optional argument like `auto_acceppt`
+  // must surface as an error to the client, not be stripped so the tool runs
+  // with the optional argument silently at its default. (A misspelled
+  // required argument would also have failed under strip mode, so the
+  // optional-argument typo is the case that proves strictness.)
+  await withMock(null, async (client, requests) => {
+    let errored = false;
+    try {
+      const result = await client.callTool({ name: "jev_verify", arguments: { claims: ["a"], evidence: "b", auto_acceppt: 0.9 } });
+      errored = result.isError === true;
+    } catch {
+      errored = true; // SDK surfaces schema violations as JSON-RPC errors
+    }
+    assert.ok(errored, "unknown top-level key was accepted");
+    assert.equal(requests.length, 0, "tool ran and called the API despite the unknown key");
+  });
+});
+
+test("unknown keys inside fixed nested input objects are rejected", async () => {
+  // Nested strict: extra keys on a candidate/class/field item are errors too,
+  // so a client cannot smuggle in fields the tool never reads.
+  const cases = [
+    {
+      name: "jev_find",
+      arguments: { query: "q", candidates: [{ id: "a", text: "Alpha", weight: 2 }] },
+    },
+    {
+      name: "jev_classify",
+      arguments: { items: [{ id: "i", text: "t" }], classes: [{ id: "c", description: "d", priority: 1 }, { id: "c2", description: "d2" }] },
+    },
+    {
+      name: "jev_extract",
+      arguments: { document: "v1.2.3", fields: [{ id: "version", pattern: "[0-9.]+", description: "d", fallback: "0" }] },
+    },
+  ];
+  for (const { name, arguments: toolArguments } of cases) {
+    await withMock(null, async (client, requests) => {
+      let errored = false;
+      try {
+        const result = await client.callTool({ name, arguments: toolArguments });
+        errored = result.isError === true;
+      } catch {
+        errored = true;
+      }
+      assert.ok(errored, `${name} accepted an unknown nested key`);
+      assert.equal(requests.length, 0, `${name} ran despite the unknown nested key`);
+    });
+  }
+});
+
+test("the open context record still accepts arbitrary keys", async () => {
+  // `context` is deliberately not a fixed shape: any record must keep working.
+  await withMock(
+    (body) => {
+      assert.equal(body.state.context.policies, "be excellent");
+      return { i0: { choice: "c0", confidence: 0.9, probabilities: { c0: 0.9, c1: 0.05, c2: 0.05 } } };
+    },
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_classify",
+        arguments: { ...CLASSIFY_ARGS, context: { policies: "be excellent", anything: [1, 2] } },
+      });
+      assert.notEqual(result.isError, true);
+      assert.equal(payload(result).results[0].classification, "billing");
+    },
+  );
+});
