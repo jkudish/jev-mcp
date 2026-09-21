@@ -1228,3 +1228,60 @@ test("mathematically exact 0.01 sum deltas survive float comparison", async () =
     assert.equal(body.results[0].classification, "a");
   });
 });
+
+test("tools fail closed with structured invalid_response when the answers envelope is null", async () => {
+  // The askJev wrapper normalizes a null or non-object answers payload to {}
+  // (the typesafe SDK transport does not reject it), so every tool takes its
+  // per-answer invalid_response path instead of crashing with a TypeError.
+  // These cases cover the three projection styles: shared Choice validation
+  // (classify), manual Noul indexing (rerank), and the review helper.
+  const cases = [
+    {
+      tool: "jev_classify",
+      arguments: CLASSIFY_ARGS,
+      check: (body) => assert.equal(body.results[0].classification, null),
+    },
+    {
+      tool: "jev_rerank",
+      arguments: { query: "What is the query about?", candidates: [{ id: "a", text: "Alpha document" }, { id: "b", text: "Beta document" }] },
+      check: (body) => assert.equal(body.status, "invalid_response"),
+    },
+    {
+      tool: "jev_review",
+      arguments: { request: "Is this safe?", diff: "+ console.log('hi')" },
+      check: (body) => assert.equal(body.status, "invalid_response"),
+    },
+  ];
+  // Default (typesafe SDK) provider: unlike the compatible transport, it does
+  // not reject a null envelope itself, so the askJev wrapper's envelope guard
+  // is the backstop that turns it into structured invalid_response.
+  for (const { tool, arguments: toolArguments, check } of cases) {
+    await withMock(null, async (client) => {
+      const result = await client.callTool({ name: tool, arguments: toolArguments });
+      assert.notEqual(result.isError, true, `${tool} crashed instead of failing closed`);
+      check(payload(result));
+    });
+  }
+});
+
+test("jev_extract accepts a float-broken probability sum that the shared tolerance covers", async () => {
+  // 0.33 + 0.33 + 0.33 sums to 0.99 with a float delta of
+  // 0.010000000000000009, which a bare 0.01 comparison rejects. The shared
+  // PROBABILITY_SUM_TOLERANCE exists for exactly this; extract now uses it.
+  await withMock(() => ({
+    f0: { choice: "c0", confidence: 0.99, probabilities: { c0: 0.33, c1: 0.33, none_of_them: 0.33 } },
+  }), async (client) => {
+    const result = await client.callTool({
+      name: "jev_extract",
+      arguments: {
+        document: "v1.2.3 and v2.0.0",
+        fields: [{ id: "version", pattern: "[0-9][0-9.]*", description: "The release version number of the software" }],
+      },
+    });
+    const body = payload(result);
+    // Tied-maximum choice at 0.33 is a review, never invalid_response; the
+    // value survives, which is only possible if the sum check passed.
+    assert.equal(body.results[0].status, "review");
+    assert.equal(body.results[0].value, "1.2.3");
+  }, compatibleEnv);
+});
