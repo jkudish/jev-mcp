@@ -11,6 +11,15 @@ export const MAX_CANDIDATE_CHARS = 2000;
 export const PROBABILITY_SUM_TOLERANCE = 0.01 + 1e-12;
 
 /**
+ * A JSON object on the wire: present, non-null, and not an array. Shared by the
+ * transport boundary (provider payloads) and the tool boundary (the `answers`
+ * envelope), so both agree on what counts as a record.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * Sanitize a caller-supplied id into a safe Choice option key.
  * Keeps alphanumerics, underscore, dash and dot; collapses the rest.
  */
