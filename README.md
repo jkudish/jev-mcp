@@ -153,7 +153,20 @@ Check each claim in a report, PR description, or agent brief against the sources
 }
 ```
 
-- With multiple evidence items, each claim also gets the id of the evidence it rests on.
+Malformed or missing relation answers fail closed per claim (other valid claims are preserved). A missing, null, or non-object `answers` envelope invalidates every claim:
+
+```jsonc
+// invalid result entry; tool/model/provider/auto_accept/summary/results/usage remain
+{
+  "id": "claim0", "claim": "The claim being checked",
+  "verdict": "unknown", "probabilities": null, "confidence": null,
+  "status": "invalid_response", "action": "review", "supporting_evidence": null
+}
+```
+
+- Relation choices must belong to the requested set and be a maximum-probability option. Distributions must contain exactly all relation keys, with finite probabilities in `[0,1]` summing to 1 within `0.01`.
+- Missing or null confidence stays `null` and requires `review`, even with `auto_accept: 0`. Non-number, non-finite, or out-of-range confidence invalidates the claim and is returned as `null`; numeric zero is valid.
+- With multiple evidence items, each claim also gets the id of the evidence it rests on. These source answers are optional auxiliary information; missing sources yield `supporting_evidence: null` without invalidating a valid relation. A present source must be a well-formed choice over the evidence ids plus `none`; anything else yields `null`.
 - `auto_accept` (default `0.8`) is the confidence at or above which a verdict stands. Lower-confidence verdicts come back flagged `review`.
 - For quote-level citation checks, match quotes against the source in code first and send only the surviving claims. See the [citation-check cookbook](https://docs.typesafe.ai/cookbooks/citation_check).
 
@@ -176,6 +189,19 @@ Judge fetched or pasted text before an agent reads it. One call returns the prob
   "recommendation": { "action": "block", "reason": "injection probability 0.99 >= block threshold 0.75" }
 }
 ```
+
+Missing or malformed required answers return an error branch:
+
+```jsonc
+// abridged; tool/model/provider/thresholds/usage remain
+{
+  "status": "invalid_response",
+  "probabilities": { "injection": null, "substance": 0.9, "relevance": null },
+  "recommendation": { "action": "review", "reason": "missing or malformed answers; cannot screen safely" }
+}
+```
+
+All requested probabilities must be finite numbers in `[0,1]`; zero is valid. Invalid or missing probabilities become `null`, while valid values are retained. Relevance is required only when a non-empty purpose is supplied; otherwise it is `null`. A missing, null, or non-object `answers` envelope also takes this error branch.
 
 - The recommendation is advisory: `pass`, `review`, `block`, or `skip`. The server never blocks on its own; enforcement stays with the calling agent.
 - Low substance or relevance yields `skip`: the page is not worth reading.
@@ -211,7 +237,19 @@ Rank candidates against a plain-language query. No embeddings, no index to maint
 }
 ```
 
-- Ranking always returns a winner, because Choice probabilities sum to 1. A top hit can masquerade as an answer when none is present; the exists check catches that. `exists_verdict` is `answered`, `partial`, or `absent`.
+Missing or malformed `exists` or `best` answers return an error branch:
+
+```jsonc
+// abridged; tool/model/provider/query/usage remain
+{
+  "status": "invalid_response", "exists": null, "exists_verdict": null, "top": [],
+  "reason": "missing or malformed best or exists answer; cannot rank safely"
+}
+```
+
+`exists` must be a finite number in `[0,1]`; zero validly means `absent`. On failure, a valid `exists` value is retained; an invalid or missing value becomes `null`. The best distribution must contain exactly all candidate ids, finite probabilities in `[0,1]` summing to 1 within `0.01`, and a string choice tied for the maximum probability. Missing, null, or non-object `answers` also returns this error branch. Protocol failure is reported only in `status`; `exists_verdict` is `null` on failure.
+
+- On successful responses, ranking always returns a winner, because Choice probabilities sum to 1. A top hit can masquerade as an answer when none is present; the exists check catches that. `exists_verdict` is `answered`, `partial`, or `absent`.
 - Up to 250 candidates per call. Candidate texts are truncated at 2,000 characters.
 - Pattern from the [semantic-find cookbook](https://docs.typesafe.ai/cookbooks/semantic_find).
 
@@ -608,7 +646,7 @@ export JEV_API_KEY=your-compatible-provider-key
 export JEV_MCP_MODEL=openjev
 ```
 
-The server sends `POST` requests with `{ model, state, questions }` and requires the standard response shape: an `answers` object carrying one answer per requested question, each valid for its question type (a finite [0,1] noul probability, a choice among that question's criteria, or a score within its rubric), plus a `usage` object reporting `input_tokens` and `output_tokens`. Malformed responses are rejected at the transport boundary rather than passed through to the tools, and an optional `model` string echoes the model that answered. `JEV_API_BASE_URL` must be the full endpoint URL including the `/v1/systemone` path; it is used verbatim, with no trailing-slash or path normalization. The endpoint and credentials are kept in the local process environment. This adapter is provider-neutral; OpenJEV is one example, not a hard-coded dependency.
+The server sends `POST` requests with `{ model, state, questions }` and requires the standard response shape: an `answers` object plus a `usage` object reporting `input_tokens` and `output_tokens`, with an optional `model` string echoing the model that answered. Envelope problems (a non-object body or `answers`, malformed `usage` counts, a non-string `model`) are rejected at the transport boundary. Individual answers are not judged here: each tool validates them under its own `invalid_response` contract, so a missing or malformed answer fails closed in the tool instead of aborting the call. `JEV_API_BASE_URL` must be the full endpoint URL including the `/v1/systemone` path; it is used verbatim, with no trailing-slash or path normalization. The endpoint and credentials are kept in the local process environment. This adapter is provider-neutral; OpenJEV is one example, not a hard-coded dependency.
 
 ## Also in the family
 

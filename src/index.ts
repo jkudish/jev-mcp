@@ -37,6 +37,7 @@ import {
   MAX_REQUIREMENTS,
   MAX_CANDIDATES,
   MAX_CANDIDATE_CHARS,
+  PROBABILITY_SUM_TOLERANCE,
   MAX_GATE_CLAIMS,
   MAX_GATE_EVIDENCE_CHARS,
   MAX_GATE_EVIDENCE_ITEMS,
@@ -176,21 +177,44 @@ server.registerTool(
       evidence,
     };
 
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
+    const answers = isAnswerRecord(rawAnswers) ? rawAnswers : {};
 
     const results = claimItems.map((claim) => {
       const relation = answers[`relation_${claim.id}`];
-      const source = answers[`source_${claim.id}`];
-      const confidence = relation?.confidence ?? null;
-      const verdict = RELATION_TO_VERDICT[relation?.choice] ?? "unknown";
+      const validated = validateChoiceAnswer(relation, Object.keys(RELATION_TO_VERDICT));
+      // source_* is optional auxiliary information, requested only for multiple
+      // evidence items. Its absence does not invalidate the relation verdict,
+      // but a present source must name a supplied evidence id (or "none").
+      const sourceKeys = [...evidence.map((e) => e.id), "none"];
+      const source = validateChoiceAnswer(answers[`source_${claim.id}`], sourceKeys);
+      const valid = validated && Object.hasOwn(RELATION_TO_VERDICT, validated.choice) &&
+        (relation.confidence == null || validated.confidence !== null);
+      const confidence = valid ? validated.confidence : null;
+      if (!valid) {
+        // A missing or malformed relation must not masquerade as an unsupported
+        // claim: surface it as invalid so callers can tell protocol failure
+        // apart from a real verdict.
+        return {
+          id: claim.id,
+          claim: claim.text,
+          verdict: "unknown",
+          probabilities: null,
+          confidence: null,
+          status: "invalid_response" as const,
+          action: "review" as const,
+          supporting_evidence: null,
+        };
+      }
+      const verdict = RELATION_TO_VERDICT[relation.choice];
       return {
         id: claim.id,
         claim: claim.text,
         verdict,
-        probabilities: relation?.probabilities ?? null,
+        probabilities: relation.probabilities ?? null,
         confidence,
         action: confidence === null ? "review" : verifyAction(confidence, autoAccept),
-        supporting_evidence: source?.choice && source.choice !== "none" ? source.choice : null,
+        supporting_evidence: source && source.choice !== "none" ? source.choice : null,
       };
     });
 
@@ -258,13 +282,28 @@ server.registerTool(
     }
 
     const state = { content, purpose: purpose ?? null };
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
+    const answers = isAnswerRecord(rawAnswers) ? rawAnswers : {};
 
-    const injection = answers.injection?.noul ?? 0;
-    const substance = answers.substance?.noul ?? undefined;
-    const relevance = purpose ? (answers.relevance?.noul ?? undefined) : undefined;
+    const injection = validateNoulAnswer(answers.injection);
+    const substance = validateNoulAnswer(answers.substance);
+    const relevance = purpose ? validateNoulAnswer(answers.relevance) : undefined;
+    if (injection === null || substance === null || (purpose && relevance === null)) {
+      // A screening tool must fail closed: a missing or malformed answer must
+      // not be treated as a clean bill of health (injection ?? 0 would pass).
+      return text({
+        tool: "jev_screen",
+        model: model,
+        provider,
+        status: "invalid_response",
+        probabilities: { injection: injection ?? null, substance: substance ?? null, relevance: relevance ?? null },
+        thresholds: { block_at: blockAt, review_at: reviewAt },
+        recommendation: { action: "review", reason: "missing or malformed answers; cannot screen safely" },
+        usage,
+      });
+    }
 
-    const recommendation = screenRecommendation({ injection, relevance, substance, blockAt, reviewAt });
+    const recommendation = screenRecommendation({ injection, relevance: relevance ?? undefined, substance, blockAt, reviewAt });
 
     return text({
       tool: "jev_screen",
@@ -314,11 +353,28 @@ server.registerTool(
     };
 
     const state = { query, candidates };
-    const { answers, usage, provider, model } = await askJev(state, questions);
+    const { answers: rawAnswers, usage, provider, model } = await askJev(state, questions);
+    const answers = isAnswerRecord(rawAnswers) ? rawAnswers : {};
 
-    const probabilities = answers.best?.probabilities ?? {};
-    const ranked = rankCandidates(candidates, probabilities).slice(0, topK);
-    const exists = answers.exists?.noul ?? 0;
+    const exists = validateNoulAnswer(answers.exists);
+    const best = validateChoiceAnswer(answers.best, candidates.map((c) => c.id));
+    if (exists === null || best === null) {
+      // A missing exists/best answer must not be read as "no match" (exists ?? 0)
+      // or "no ranking": surface the protocol failure instead.
+      return text({
+        tool: "jev_find",
+        model: model,
+        provider,
+        query,
+        status: "invalid_response",
+        exists: exists ?? null,
+        exists_verdict: null,
+        top: [],
+        reason: "missing or malformed best or exists answer; cannot rank safely",
+        usage,
+      });
+    }
+    const ranked = rankCandidates(candidates, best.probabilities).slice(0, topK);
 
     return text({
       tool: "jev_find",
@@ -424,23 +480,9 @@ server.registerTool(
 
     const keyToExternal = new Map(classes.map((c) => [c.key, c.external]));
     const results = items.map((item) => {
-      const answer = answers[item.key];
-      const expected = new Set(classes.map((c) => c.key));
-      const probabilities: Record<string, number> = answer?.probabilities ?? {};
-      const keys = Object.keys(probabilities);
-      const values = Object.values(probabilities);
-      const sum = values.reduce((a, b) => a + b, 0);
-      const valid =
-        answer &&
-        typeof answer.choice === "string" &&
-        expected.has(answer.choice) &&
-        keys.length >= expected.size &&
-        keys.every((k) => expected.has(k)) &&
-        values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) &&
-        Math.abs(sum - 1) <= 0.01 &&
-        !(probabilities[answer.choice] < Math.max(...values) - 1e-9);
+      const answer = validateChoiceAnswer(answers[item.key], classes.map((c) => c.key));
 
-      if (!valid) {
+      if (!answer) {
         return {
           id: item.external,
           status: "invalid_response" as const,
@@ -452,16 +494,17 @@ server.registerTool(
         };
       }
 
+      const values = Object.values(answer.probabilities);
       const ranked = values.slice().sort((a, b) => b - a);
       const margin = ranked.length >= 2 ? ranked[0] - ranked[1] : 0;
-      const topProbability = probabilities[answer.choice];
+      const topProbability = answer.probabilities[answer.choice];
       return {
         id: item.external,
         classification: keyToExternal.get(answer.choice) ?? answer.choice,
         probabilities: Object.fromEntries(
-          classes.map((c) => [c.external, probabilities[c.key] ?? 0]),
+          classes.map((c) => [c.external, answer.probabilities[c.key] ?? 0]),
         ),
-        confidence: answer.confidence ?? null,
+        confidence: answer.confidence,
         margin,
         top_probability: topProbability,
         decision: classificationDecision(topProbability, margin, autoAccept, minMargin),
@@ -586,37 +629,16 @@ server.registerTool(
     const expectedRecKeys = new Set([...candidateKeys.map((c) => c.key), ...(includeHatches ? Object.keys(DECIDE_ESCAPE_HATCHES) : [])]);
     const expectedCheckKeys = new Set(["supported", "contradicted", "unknown"]);
 
-    // classify-grade validation: exact keys, finite [0,1] probabilities summing
-    // to one, chosen key is the argmax, confidence finite or null. Malformed
-    // responses are never semantic outcomes.
-    const validateChoice = (answer: any, expected: Set<string>) => {
-      if (!answer || typeof answer.choice !== "string" || !expected.has(answer.choice)) return null;
-      const probabilities: Record<string, number> = answer.probabilities ?? {};
-      const keys = Object.keys(probabilities);
-      const values = Object.values(probabilities);
-      if (
-        keys.length !== expected.size ||
-        !keys.every((k) => expected.has(k)) ||
-        !values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) ||
-        Math.abs(values.reduce((a: number, b: number) => a + b, 0) - 1) > 0.01 ||
-        // Choice contract: the chosen option must be the argmax.
-        probabilities[answer.choice] < Math.max(...values) - 1e-9
-      )
-        return null;
-      const rawConfidence = answer.confidence;
-      const confidence =
-        typeof rawConfidence === "number" && Number.isFinite(rawConfidence) && rawConfidence >= 0 && rawConfidence <= 1
-          ? rawConfidence
-          : null;
-      return { choice: answer.choice, confidence, probabilities };
-    };
-
-    const rec = validateChoice(answers.recommendation, expectedRecKeys);
+    // classify-grade validation via the shared validateChoiceAnswer: exact
+    // keys, finite [0,1] probabilities summing to one within the shared
+    // tolerance, chosen key is the argmax, confidence finite or null.
+    // Malformed responses are never semantic outcomes.
+    const rec = validateChoiceAnswer(answers.recommendation, expectedRecKeys);
     const recProbabilities: Record<string, number> = rec?.probabilities ?? {};
     const recommendedKey = rec?.choice ?? null;
     const checks = candidateKeys.flatMap((c, i) =>
       requirements.map((_, j) => {
-        const answer = validateChoice(answers[`check_${i}_${j}`], expectedCheckKeys);
+        const answer = validateChoiceAnswer(answers[`check_${i}_${j}`], expectedCheckKeys);
         return { candidate: c.id, requirement: j, answer: answer?.choice ?? "invalid_response" };
       }),
     );
@@ -816,30 +838,11 @@ server.registerTool(
     const { answers, usage, provider, model } = await askJev(state, questions);
 
     const expected = new Set(Object.keys(COMPARE_RELATIONS));
-    const validateChoice = (answer: unknown) => {
-      if (!answer || typeof (answer as any).choice !== "string" || !expected.has((answer as any).choice)) return null;
-      const probabilities: Record<string, number> = (answer as any).probabilities ?? {};
-      const keys = Object.keys(probabilities);
-      const values = Object.values(probabilities);
-      if (
-        keys.length !== expected.size ||
-        !keys.every((k) => expected.has(k)) ||
-        !values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) ||
-        Math.abs(values.reduce((x, y) => x + y, 0) - 1) > 0.01 ||
-        // Choice contract: the chosen option must be the argmax.
-        probabilities[(answer as any).choice] < Math.max(...values) - 1e-9
-      )
-        return null;
-      const rawConfidence = (answer as any).confidence;
-      const confidence =
-        typeof rawConfidence === "number" && Number.isFinite(rawConfidence) && rawConfidence >= 0 && rawConfidence <= 1
-          ? rawConfidence
-          : null;
-      return { choice: (answer as any).choice, confidence, probabilities };
-    };
 
+    // classify-grade validation via the shared validateChoiceAnswer; the
+    // overall and aspect questions share the same three relation keys.
     const shape = (raw: unknown) => {
-      const answer = validateChoice(raw);
+      const answer = validateChoiceAnswer(raw, expected);
       if (!answer) {
         return {
           relation: null,
@@ -1163,6 +1166,36 @@ function validateScoreAnswer(answer: unknown): { score: number; confidence: numb
   return { score: a.score, confidence };
 }
 
+// API objects must be records, not null, arrays, or primitive values.
+function isAnswerRecord(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// Choice contract: exact candidate keys, finite [0,1] probabilities summing
+// to one within PROBABILITY_SUM_TOLERANCE, and a choice tied for the maximum
+// probability.
+function validateChoiceAnswer(answer: unknown, expectedKeys: Iterable<string>): {
+  choice: string; probabilities: Record<string, number>; confidence: number | null;
+} | null {
+  if (!isAnswerRecord(answer) || typeof answer.choice !== "string" || !isAnswerRecord(answer.probabilities)) return null;
+  const expected = new Set(expectedKeys);
+  const probabilities: Record<string, number> = answer.probabilities;
+  const keys = Object.keys(probabilities);
+  const values = Object.values(probabilities);
+  if (
+    !expected.has(answer.choice) || keys.length !== expected.size ||
+    !keys.every((key) => expected.has(key)) ||
+    !values.every((p) => typeof p === "number" && Number.isFinite(p) && p >= 0 && p <= 1) ||
+    Math.abs(values.reduce((a, b) => a + b, 0) - 1) > PROBABILITY_SUM_TOLERANCE ||
+    probabilities[answer.choice] < Math.max(...values) - 1e-9
+  ) return null;
+  const confidence =
+    typeof answer.confidence === "number" && Number.isFinite(answer.confidence) && answer.confidence >= 0 && answer.confidence <= 1
+      ? answer.confidence
+      : null;
+  return { choice: answer.choice, probabilities, confidence };
+}
+
 // Noul contract: a finite probability in [0,1].
 function validateNoulAnswer(answer: unknown): number | null {
   const a = answer as { noul?: unknown } | null | undefined;
@@ -1400,32 +1433,13 @@ server.registerTool(
 
     const review = projectReviewHalf(answers, { autoAccept, reviewAt, compositeFloor }, truncated);
 
-    // classify-grade validation: exact keys, finite [0,1] probabilities summing
-    // to one, chosen key is the argmax, confidence finite or null.
+    // classify-grade validation via the shared validateChoiceAnswer: exact
+    // keys, finite [0,1] probabilities summing to one within the shared
+    // tolerance, chosen key is the argmax, confidence finite or null.
     const expectedClaimKeys = new Set(Object.keys(VERIFY_CLAIM_CRITERIA));
-    const validateChoice = (answer: any) => {
-      if (!answer || typeof answer.choice !== "string" || !expectedClaimKeys.has(answer.choice)) return null;
-      const probabilities: Record<string, number> = answer.probabilities ?? {};
-      const keys = Object.keys(probabilities);
-      const values = Object.values(probabilities);
-      if (
-        keys.length !== expectedClaimKeys.size ||
-        !keys.every((k) => expectedClaimKeys.has(k)) ||
-        !values.every((p) => Number.isFinite(p) && p >= 0 && p <= 1) ||
-        Math.abs(values.reduce((a: number, b: number) => a + b, 0) - 1) > 0.01 ||
-        probabilities[answer.choice] < Math.max(...values) - 1e-9
-      )
-        return null;
-      const rawConfidence = answer.confidence;
-      const confidence =
-        typeof rawConfidence === "number" && Number.isFinite(rawConfidence) && rawConfidence >= 0 && rawConfidence <= 1
-          ? rawConfidence
-          : null;
-      return { choice: answer.choice, confidence, probabilities };
-    };
 
     const results = claims.map((claim, i) => {
-      const answer = validateChoice(answers[`claim_${i}`]);
+      const answer = validateChoiceAnswer(answers[`claim_${i}`], expectedClaimKeys);
       if (!answer) {
         return {
           claim,
