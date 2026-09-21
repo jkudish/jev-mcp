@@ -360,10 +360,16 @@ test("compatible provider does not retry an ambiguous connection failure", async
 });
 
 test("deadline expiry during retry backoff surfaces promptly without another attempt", async () => {
-  const started = Date.now();
   await withMock(
     {},
     async (client, requests) => {
+      // Measured from just before the call, so spawn time cannot eat the
+      // budget. With a 300ms deadline, the abort-aware backoff ends inside
+      // the deadline (at most a second, instantly-aborted request when the
+      // first jittered sleep 250-500ms resolves first). A regression to a
+      // plain sleep would run sleep1 + sleep2 (750ms+ of backoff alone)
+      // and typically reach a third request, tripping both assertions.
+      const started = Date.now();
       const result = await client.callTool({
         name: "jev_verify",
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
@@ -371,7 +377,7 @@ test("deadline expiry during retry backoff surfaces promptly without another att
       assert.equal(result.isError, true);
       assert.match(result.content[0].text, /exceeded the 300ms deadline/);
       assert.ok(requests.length <= 2, `expected at most 2 requests, saw ${requests.length}`);
-      assert.ok(Date.now() - started < 2500, "deadline should not wait out the backoff sleep");
+      assert.ok(Date.now() - started < 1000, "deadline should cut the backoff sleep short");
     },
     (port) => compatibleEnv(port, { JEV_MCP_REQUEST_TIMEOUT_MS: "300", JEV_MCP_MAX_ATTEMPTS: "6" }),
     { status: 503, raw: JSON.stringify({ error: "unavailable" }) },
@@ -461,7 +467,9 @@ test("openrouter provider redacts a reflected key from error bodies", async () =
     (port) => ({
       JEV_PROVIDER: "openrouter",
       OPENROUTER_API_KEY: "sk-or-v1-echo-secret",
-      JEV_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}`,
+      // Trailing slash on purpose: the configured root must join to a
+      // single-slash /alpha/decisions request path.
+      JEV_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}/`,
     }),
     { status: 401, raw: JSON.stringify({ error: "invalid key sk-or-v1-echo-secret (Bearer sk-or-v1-echo-secret)" }) },
   );

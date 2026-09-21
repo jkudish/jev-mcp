@@ -628,8 +628,8 @@ Jev is TypeSafe's System One model: it returns typed answers with calibrated pro
 | `JEV_API_BASE_URL` + `JEV_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `JEV_PROVIDER=compatible`. `JEV_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
 | `JEV_MCP_REQUEST_TIMEOUT_MS` | `60000` | Whole-request deadline in milliseconds, covering every attempt, on the fetch-based transports. |
 | `JEV_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on the fetch-based transports; retries happen only on 408, 409, 429, and 500 through 599. |
-| `JEV_OPENROUTER_BASE_URL` | `https://openrouter.ai/api` | Override the OpenRouter API root (origin only; the `/alpha/decisions` path is appended). |
-| `JEV_CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Override the Cloudflare API root (origin only; `/accounts/<id>/ai/run` is appended). |
+| `JEV_OPENROUTER_BASE_URL` | `https://openrouter.ai/api` | Override the OpenRouter API root (the `/alpha/decisions` path is appended; a trailing slash is tolerated). |
+| `JEV_CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Override the Cloudflare API root (`/accounts/<id>/ai/run` is appended; a trailing slash is tolerated). |
 
 ### Transport resilience
 

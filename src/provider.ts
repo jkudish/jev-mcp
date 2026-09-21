@@ -179,6 +179,15 @@ async function readBodyBounded(response: Response, deadline: Deadline): Promise<
 }
 
 /**
+ * Appends a fixed path to a configured API root. Both defaults carry path
+ * prefixes, not just origins, and a conventional trailing slash must not
+ * produce a "//path" request.
+ */
+function apiUrl(root: string, path: string): string {
+  return `${root.replace(/\/+$/, "")}${path}`;
+}
+
+/**
  * Fetch with bounded, jittered retries on the 408/409/429/5xx allowlist only.
  * A status cannot prove the request was not processed, but that allowlist is
  * the standard not-processed signal set and the only retry trigger. Ambiguous
@@ -330,7 +339,7 @@ export async function askJev(
     const slug = effective.startsWith("typesafe/") ? effective : `typesafe/${effective}`;
     const deadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetchWithResilience(`${process.env.JEV_OPENROUTER_BASE_URL || "https://openrouter.ai/api"}/alpha/decisions`, {
+      const response = await fetchWithResilience(apiUrl(process.env.JEV_OPENROUTER_BASE_URL || "https://openrouter.ai/api", "/alpha/decisions"), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
@@ -451,7 +460,7 @@ export async function askJev(
   let cfBody: Record<string, any>;
   let cfStatus = 0;
   try {
-    const cfResponse = await fetchWithResilience(`${cfBase}/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run`, {
+    const cfResponse = await fetchWithResilience(apiUrl(cfBase, `/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run`), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.JEV_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN}`,
