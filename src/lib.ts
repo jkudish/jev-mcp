@@ -243,6 +243,20 @@ export const MAX_REVIEW_DOC_CHARS = 50_000;
 /** Per-claim cap (characters) in jev_gate; claims are bounded assertions. */
 export const MAX_CLAIM_CHARS = 2_000;
 
+/**
+ * Tolerance for checking a score answer's reported score against its own
+ * distribution's expected value: |score - sum(i * p_i)| must stay within
+ * this for the answer to count. With two-decimal reporting, the score itself
+ * can drift by 0.005 from the exact mean, and each of the three
+ * distribution probabilities can drift by 0.005, contributing up to
+ * 0.005 * (0 + 1 + 2) = 0.015 more, so 0.02 covers the full rounding
+ * envelope (0.005 + 0.015); the 1e-12 mirrors PROBABILITY_SUM_TOLERANCE's
+ * float guard. This is a validation choice of this package, not an upstream
+ * guarantee: a conforming provider may report an exactly consistent score,
+ * and any drift beyond this is treated as a contradictory answer.
+ */
+export const SCORE_MEAN_TOLERANCE = 0.02 + 1e-12;
+
 /** Default composite floor: auto requires the weighted composite at or above this. */
 export const DEFAULT_COMPOSITE_FLOOR = 0.7;
 

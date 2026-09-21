@@ -1354,3 +1354,176 @@ test("the open context record still accepts arbitrary keys", async () => {
     },
   );
 });
+
+// ── review score distributions (#20) ────────────────────────────────────────
+
+const DISTRIBUTION = (p0, p1, p2) => ({ 0: p0, 1: p1, 2: p2 });
+
+test("jev_review preserves a reported score distribution and validates it end to end", async () => {
+  // Mean of the distribution (1.7) matches the reported score; the
+  // distribution must surface in the result unchanged.
+  const answers = () => ({
+    correctness: { score: 1.7, confidence: 0.93, probabilities: DISTRIBUTION(0.05, 0.2, 0.75) },
+    spec_match: { score: 2, confidence: 0.93, probabilities: DISTRIBUTION(0, 0, 1) },
+    test_gap: { score: 0, confidence: 0.93, probabilities: DISTRIBUTION(1, 0, 0) },
+    blast_radius: { score: 0, confidence: 0.93, probabilities: DISTRIBUTION(1, 0, 0) },
+    safe_to_apply: { noul: 0.95 },
+  });
+  await withMock(answers, async (client) => {
+    const body = payload(await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS }));
+    assert.equal(body.action, "auto");
+    assert.deepEqual(body.scores.correctness.probabilities, DISTRIBUTION(0.05, 0.2, 0.75));
+    assert.deepEqual(body.scores.spec_match.probabilities, DISTRIBUTION(0, 0, 1));
+    assert.ok(body.reason_codes.includes("accepted"));
+    assert.deepEqual(body.limiting_rubrics, []);
+  });
+});
+
+test("jev_review leaves an absent score distribution as null and stays valid", async () => {
+  // Absent means "not reported" (Vercel score-only responses): valid, null.
+  await withMock(() => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS }));
+    assert.equal(body.action, "auto");
+    assert.equal(body.scores.correctness.probabilities, null);
+  });
+});
+
+test("a present but malformed or contradictory score distribution invalidates", async () => {
+  // Behavior change: distributions were previously ignored; a distribution
+  // that is present but wrong (bad keys, bad sum, mean drift beyond
+  // SCORE_MEAN_TOLERANCE) now marks the rubric invalid_response.
+  const bad = [
+    DISTRIBUTION(0.5, 0.5),                    // wrong key set
+    DISTRIBUTION(0.2, 0.2, 0.2),               // does not sum to one
+    DISTRIBUTION(1, 0, 0),                     // mean 0 vs reported score 2
+  ];
+  for (const probabilities of bad) {
+    await withMock(() => ({
+      ...STRONG_REVIEW,
+      correctness: { score: 2, confidence: 0.93, probabilities },
+      safe_to_apply: { noul: 0.95 },
+    }), async (client) => {
+      const body = payload(await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS }));
+      assert.equal(body.status, "invalid_response");
+      assert.equal(body.scores.correctness.status, "invalid_response");
+      assert.equal(body.scores.correctness.probabilities, null);
+      assert.ok(body.reason_codes.includes("invalid_response"));
+    });
+  }
+});
+
+test("jev_review reason codes and limiting rubrics cover each action path", async () => {
+  // unknown_confidence: a null-confidence rubric limits.
+  await withMock(() => ({
+    ...STRONG_REVIEW,
+    test_gap: { score: 0, confidence: null },
+    safe_to_apply: { noul: 0.95 },
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS }));
+    assert.equal(body.action, "escalate");
+    assert.deepEqual(body.reason_codes, ["unknown_confidence"]);
+    assert.deepEqual(body.limiting_rubrics, ["test_gap"]);
+  });
+
+  // confidence_below_review with a two-way tie at the minimum confidence.
+  await withMock(() => ({
+    ...STRONG_REVIEW,
+    test_gap: { score: 0, confidence: 0.3 },
+    blast_radius: { score: 0, confidence: 0.3 },
+    safe_to_apply: { noul: 0.95 },
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS }));
+    assert.equal(body.action, "escalate");
+    assert.deepEqual(body.reason_codes, ["confidence_below_review"]);
+    assert.deepEqual(body.limiting_rubrics, ["test_gap", "blast_radius"]);
+  });
+
+  // safe_to_apply below review_at escalates on its own.
+  await withMock(() => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.2 } }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS }));
+    assert.equal(body.action, "escalate");
+    assert.ok(body.reason_codes.includes("safe_to_apply_below_review"));
+    assert.deepEqual(body.limiting_rubrics, []);
+  });
+
+  // composite_below_floor: the least favorable rubric limits.
+  await withMock(() => ({
+    correctness: { score: 2, confidence: 0.9 },
+    spec_match: { score: 2, confidence: 0.9 },
+    test_gap: { score: 2, confidence: 0.9 },
+    blast_radius: { score: 2, confidence: 0.9 },
+    safe_to_apply: { noul: 0.95 },
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_review", arguments: { ...REVIEW_ARGS, composite_floor: 0.99 } }));
+    assert.equal(body.action, "review");
+    assert.deepEqual(body.reason_codes, ["composite_below_floor"]);
+    assert.deepEqual(body.limiting_rubrics, ["test_gap", "blast_radius"]);
+  });
+
+  // confidence_below_auto_accept: confidences clear review_at but not auto_accept.
+  await withMock(() => ({
+    ...STRONG_REVIEW,
+    correctness: { score: 2, confidence: 0.6 },
+    safe_to_apply: { noul: 0.95 },
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS }));
+    assert.equal(body.action, "review");
+    assert.deepEqual(body.reason_codes, ["confidence_below_auto_accept"]);
+    assert.deepEqual(body.limiting_rubrics, ["correctness"]);
+  });
+
+  // Truncation demotes auto to review and says so.
+  await withMock(() => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }), async (client) => {
+    const body = payload(await client.callTool({
+      name: "jev_review",
+      arguments: { ...REVIEW_ARGS, diff: "+ " + "x".repeat(60_000) },
+    }));
+    assert.equal(body.action, "review");
+    assert.equal(body.truncated, true);
+    assert.deepEqual(body.reason_codes, ["incomplete_context"]);
+  });
+});
+
+test("jev_gate surfaces the review half's reason codes and limiting rubrics", async () => {
+  await withMock(() => ({
+    ...STRONG_REVIEW,
+    test_gap: { score: 0, confidence: 0.3 },
+    safe_to_apply: { noul: 0.95 },
+    claim_0: { choice: "verified", confidence: 0.9, probabilities: { verified: 0.9, contradicted: 0.05, unsupported: 0.05 } },
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_gate", arguments: GATE_ARGS }));
+    assert.equal(body.action, "escalate");
+    assert.deepEqual(body.review.reason_codes, ["confidence_below_review"]);
+    assert.deepEqual(body.review.limiting_rubrics, ["test_gap"]);
+    assert.ok(body.reason_codes.includes("confidence_below_review"));
+    assert.ok(body.reason_codes.includes("review_escalated"));
+  });
+});
+
+test("limiting rubrics include favorability ties that differ by a float ulp", async () => {
+  // correctness 0.6 and test_gap 1.4 both map to favorability 0.3, but
+  // 1 - 1.4/2 computes 0.30000000000000004: the tie must still be reported.
+  await withMock(() => ({
+    correctness: { score: 0.6, confidence: 0.93 },
+    spec_match: { score: 2, confidence: 0.93 },
+    test_gap: { score: 1.4, confidence: 0.93 },
+    blast_radius: { score: 0, confidence: 0.93 },
+    safe_to_apply: { noul: 0.95 },
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_review", arguments: { ...REVIEW_ARGS, composite_floor: 0.99 } }));
+    assert.equal(body.action, "review");
+    assert.deepEqual(body.reason_codes, ["composite_below_floor"]);
+    assert.deepEqual(body.limiting_rubrics, ["correctness", "test_gap"]);
+  });
+});
+
+test("jev_review reports safe_to_apply_below_auto_accept on the review path", async () => {
+  // Confidences and composite clear auto_accept; safe_to_apply clears
+  // review_at but not auto_accept: review, not escalate, with its own code.
+  await withMock(() => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.6 } }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS }));
+    assert.equal(body.action, "review");
+    assert.deepEqual(body.reason_codes, ["safe_to_apply_below_auto_accept"]);
+    assert.deepEqual(body.limiting_rubrics, []);
+  });
+});

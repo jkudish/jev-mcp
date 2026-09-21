@@ -52,10 +52,12 @@ for (const type of ["choice", "score"]) {
     }
   });
 
-  test(`Vercel ${type} defaults missing or null probabilities to an empty object`, () => {
+  test(`Vercel ${type} keeps missing or null probabilities absent`, () => {
+    // An absent distribution must stay absent, not become {}: tools treat
+    // absent as "not reported" and present-but-malformed as invalid.
     for (const probabilities of [undefined, null]) {
       assert.deepEqual(adaptVercelAnswers({ answers: { decision: { type, [type]: value, probabilities } } }), {
-        decision: { type, [type]: value, probabilities: {}, confidence: null },
+        decision: { type, [type]: value, confidence: null },
       });
     }
   });
