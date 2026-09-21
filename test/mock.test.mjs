@@ -169,81 +169,116 @@ test("compatible provider reports non-2xx status with the body redacted", async 
   );
 });
 
-test("compatible provider rejects empty or array answers", async () => {
-  for (const answers of [{}, []]) {
-    await withMock(
-      answers,
-      async (client) => {
-        const result = await client.callTool({
-          name: "jev_verify",
-          arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
-        });
-        assert.equal(result.isError, true);
-        assert.match(result.content[0].text, /invalid response/i);
-      },
-      compatibleEnv,
-    );
-  }
-});
-
-test("compatible provider rejects an answer missing for a requested question", async () => {
-  // jev_screen defaults a missing injection answer to zero, which would pass
-  // the screen; the transport must reject the response before that happens.
+test("compatible provider rejects a non-object answers envelope and fails closed on an empty one", async () => {
+  // An array answers envelope is rejected at the transport boundary.
   await withMock(
-    () => ({ substance: { noul: 0.9 } }),
+    [],
     async (client) => {
-      const result = await client.callTool({ name: "jev_screen", arguments: { text: "Release notes for v1.2.3" } });
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /no answer for question "injection"/);
+      assert.match(result.content[0].text, /invalid response/i);
+    },
+    compatibleEnv,
+  );
+  // An empty answers object reaches the tools, which fail closed per claim
+  // instead of the transport aborting the whole call.
+  await withMock(
+    {},
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.notEqual(result.isError, true);
+      const body = payload(result);
+      assert.equal(body.results[0].status, "invalid_response");
+      assert.equal(body.results[0].verdict, "unknown");
     },
     compatibleEnv,
   );
 });
 
-test("compatible provider rejects answers malformed for their question type", async () => {
-  const cases = [
+test("compatible provider fails closed in the tool when an answer is missing", async () => {
+  // A missing injection answer must not screen as a clean pass; the tool
+  // reports invalid_response rather than the transport aborting the call.
+  await withMock(
+    () => ({ substance: { noul: 0.9 } }),
+    async (client) => {
+      const result = await client.callTool({ name: "jev_screen", arguments: { text: "Release notes for v1.2.3" } });
+      assert.notEqual(result.isError, true);
+      const body = payload(result);
+      assert.equal(body.status, "invalid_response");
+      assert.equal(body.recommendation.action, "review");
+      assert.equal(body.probabilities.injection, null);
+      assert.equal(body.probabilities.substance, 0.9);
+    },
+    compatibleEnv,
+  );
+});
+
+test("compatible provider fails closed in the tools for answers malformed per question", async () => {
+  // Per-question validity is the tools' job: each malformed answer surfaces
+  // as structured invalid_response output, not a transport abort.
+  const toolCases = [
     // Choice off its question's catalog.
     {
       answers: () => ({ relation_claim0: { choice: "definitely", confidence: 0.99, probabilities: { definitely: 1 } } }),
       tool: "jev_verify",
       arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
-      message: /must choose one of its question's criteria/,
+      check: (body) => {
+        assert.equal(body.results[0].status, "invalid_response");
+        assert.equal(body.results[0].verdict, "unknown");
+      },
     },
     // Noul probability above one.
     {
       answers: () => ({ injection: { noul: 1.5 }, substance: { noul: 0.9 } }),
       tool: "jev_screen",
       arguments: { text: "Release notes for v1.2.3" },
-      message: /finite noul probability in \[0,1\]/,
+      check: (body) => {
+        assert.equal(body.status, "invalid_response");
+        assert.equal(body.probabilities.injection, null);
+        assert.equal(body.probabilities.substance, 0.9);
+      },
     },
     // Score beyond its three-level rubric.
     {
       answers: () => ({ ...STRONG_REVIEW, correctness: { score: 2.5, confidence: 0.9 }, safe_to_apply: { noul: 0.95 } }),
       tool: "jev_review",
       arguments: REVIEW_ARGS,
-      message: /finite score within its rubric/,
-    },
-    // Non-string model field.
-    {
-      answers: () => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }),
-      tool: "jev_review",
-      arguments: REVIEW_ARGS,
-      message: /model must be absent or a string/,
-      model: 123,
+      check: (body) => {
+        assert.equal(body.status, "invalid_response");
+        assert.equal(body.action, "escalate");
+        assert.equal(body.scores.correctness.score, null);
+        assert.equal(body.scores.correctness.status, "invalid_response");
+      },
     },
   ];
-  for (const { answers, tool, arguments: args, message, model } of cases) {
+  for (const { answers, tool, arguments: args, check } of toolCases) {
     await withMock(
       answers,
       async (client) => {
         const result = await client.callTool({ name: tool, arguments: args });
-        assert.equal(result.isError, true);
-        assert.match(result.content[0].text, message);
+        assert.notEqual(result.isError, true);
+        check(payload(result));
       },
       compatibleEnv,
-      model !== undefined ? { model } : {},
     );
   }
+  // Envelope-level problems stay at the transport: model must be a string.
+  await withMock(
+    () => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }),
+    async (client) => {
+      const result = await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /model must be absent or a string/);
+    },
+    compatibleEnv,
+    { model: 123 },
+  );
 });
 
 test("compatible provider rejects malformed or incomplete usage", async () => {

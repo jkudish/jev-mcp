@@ -30,39 +30,6 @@ function redactSecret(text: string, secret: string): string {
   return secret ? text.split(secret).join("[redacted]") : text;
 }
 
-// Boundary check of every requested question's answer for the compatible
-// provider: present as an own property and primitive-valid for its question
-// type, mirroring the invalid_response contract the tools enforce on model
-// output. Returns the first problem found, or null.
-function findInvalidAnswer(questions: Record<string, unknown>, answers: Record<string, unknown>): string | null {
-  for (const [id, question] of Object.entries(questions)) {
-    if (!Object.hasOwn(answers, id)) return `no answer for question "${id}".`;
-    const q = question as { type?: unknown; criteria?: unknown } | null;
-    const answer = answers[id];
-    if (!isRecord(answer)) return `the answer for "${id}" must be an object.`;
-    if (q?.type === "noul") {
-      const noul = answer.noul;
-      if (typeof noul !== "number" || !Number.isFinite(noul) || noul < 0 || noul > 1) {
-        return `the answer for "${id}" must report a finite noul probability in [0,1].`;
-      }
-    } else if (q?.type === "choice") {
-      const criteria = q.criteria;
-      const choice = answer.choice;
-      if (typeof choice !== "string" || !isRecord(criteria) || !Object.hasOwn(criteria, choice)) {
-        return `the answer for "${id}" must choose one of its question's criteria.`;
-      }
-    } else if (q?.type === "score") {
-      const criteria = q.criteria;
-      const score = answer.score;
-      const max = Array.isArray(criteria) ? criteria.length - 1 : -1;
-      if (max < 0 || typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > max) {
-        return `the answer for "${id}" must report a finite score within its rubric.`;
-      }
-    }
-  }
-  return null;
-}
-
 let typesafeClient: TypeSafeClient | null = null;
 
 function resolve(env: NodeJS.ProcessEnv): JevProvider {
@@ -188,11 +155,9 @@ export async function askJev(
     const invalid = (why: string) => new Error(`Jev-compatible endpoint returned an invalid response: ${why}`);
     if (!isRecord(body)) throw invalid("expected a JSON object.");
     if (!isRecord(body.answers)) throw invalid("expected an answers object.");
-    // Validate at the boundary so a garbage endpoint cannot reach tool-level
-    // defaults: a missing injection answer, for instance, would otherwise
-    // screen as a clean pass.
-    const invalidAnswer = findInvalidAnswer(questions, body.answers);
-    if (invalidAnswer !== null) throw invalid(invalidAnswer);
+    // Envelope shape is validated here; per-question answer validity is the
+    // tools' job. Each tool fails closed under its invalid_response contract,
+    // so a missing or malformed answer can never reach tool-level defaults.
     let inputTokens = 0;
     let outputTokens = 0;
     if (body.usage !== undefined && body.usage !== null) {
