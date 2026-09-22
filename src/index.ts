@@ -21,6 +21,7 @@ import { choice, noul, score } from "@typesafe-ai/sdk";
 import { z } from "zod";
 import { createRequire } from "node:module";
 import { Worker } from "node:worker_threads";
+import { startJevHttpServer } from "./http.js";
 import {
   classificationDecision,
   claimAction,
@@ -1593,6 +1594,95 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // Boot
 // ─────────────────────────────────────────────────────────────────────────────
-const server = createJevServer();
-await server.connect(new StdioServerTransport());
-console.error(`[jev-mcp] ready — model ${MODEL}`);
+type TransportMode = "stdio" | "http";
+
+const optionNames = new Set(["transport", "host", "port", "path", "session-timeout-ms"]);
+
+function parseCliOptions(args: string[]) {
+  const values = new Map<string, string>();
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!;
+    if (!argument.startsWith("--")) throw new Error(`Unexpected argument: ${argument}`);
+    const equalsAt = argument.indexOf("=");
+    const name = argument.slice(2, equalsAt === -1 ? undefined : equalsAt);
+    if (!optionNames.has(name)) throw new Error(`Unknown option: --${name}`);
+    if (values.has(name)) throw new Error(`Duplicate option: --${name}`);
+    const value = equalsAt === -1 ? args[++index] : argument.slice(equalsAt + 1);
+    if (!value || value.startsWith("--")) throw new Error(`Missing value for --${name}`);
+    values.set(name, value);
+  }
+  return values;
+}
+
+function integerOption(name: string, value: string, minimum: number, maximum: number) {
+  if (!/^\d+$/.test(value)) throw new Error(`${name} must be an integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be between ${minimum} and ${maximum}`);
+  }
+  return parsed;
+}
+
+async function main() {
+  const cli = parseCliOptions(process.argv.slice(2));
+  const transport = (cli.get("transport") ?? process.env.JEV_MCP_TRANSPORT ?? "stdio") as TransportMode;
+  if (transport !== "stdio" && transport !== "http") {
+    throw new Error("transport must be either stdio or http");
+  }
+
+  if (transport === "stdio") {
+    const server = createJevServer();
+    await server.connect(new StdioServerTransport());
+    console.error(`[jev-mcp] ready — model ${MODEL}`);
+    return;
+  }
+
+  const bearerToken = process.env.JEV_MCP_HTTP_BEARER_TOKEN;
+  if (!bearerToken) throw new Error("JEV_MCP_HTTP_BEARER_TOKEN is required in HTTP mode");
+
+  const host = cli.get("host") ?? process.env.JEV_MCP_HTTP_HOST ?? "127.0.0.1";
+  if (!host || /[\s/]/.test(host)) throw new Error("host must be a valid hostname or IP address");
+
+  const port = integerOption(
+    "port",
+    cli.get("port") ?? process.env.JEV_MCP_HTTP_PORT ?? "7337",
+    0,
+    65_535,
+  );
+  const path = cli.get("path") ?? process.env.JEV_MCP_HTTP_PATH ?? "/mcp";
+  if (!path.startsWith("/") || path === "/healthz" || /[\s?#]/.test(path)) {
+    throw new Error("path must start with /, must not be /healthz, and must not contain whitespace, ? or #");
+  }
+  const sessionTimeoutMs = integerOption(
+    "session timeout",
+    cli.get("session-timeout-ms") ?? process.env.JEV_MCP_HTTP_SESSION_TIMEOUT_MS ?? "1800000",
+    1,
+    86_400_000,
+  );
+
+  const handle = await startJevHttpServer({
+    host,
+    port,
+    path,
+    bearerToken,
+    sessionTimeoutMs,
+    createServer: createJevServer,
+  });
+  console.error(`[jev-mcp] ready — http ${handle.endpoint} pid=${process.pid}`);
+
+  let shutdown: Promise<void> | undefined;
+  const stop = () => {
+    shutdown ??= handle.close().catch((error) => {
+      process.exitCode = 1;
+      console.error(`[jev-mcp] shutdown failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    });
+    return shutdown;
+  };
+  process.once("SIGINT", () => void stop());
+  process.once("SIGTERM", () => void stop());
+}
+
+await main().catch((error) => {
+  process.exitCode = 1;
+  console.error(`[jev-mcp] failed: ${error instanceof Error ? error.message : "unknown error"}`);
+});

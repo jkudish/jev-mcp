@@ -123,6 +123,34 @@ args = ["-y", "@jkudish/jev-mcp"]
 
 Some MCP clients filter the environment before spawning servers, which silently drops `TYPESAFE_API_KEY`. If the server reports a missing key, pass it explicitly as shown above.
 
+### One shared HTTP server
+
+The default transport remains stdio. If your client starts one stdio process per chat, you can instead run one long-lived Streamable HTTP process and let multiple clients use isolated MCP sessions within it:
+
+```bash
+JEV_MCP_HTTP_BEARER_TOKEN="replace-with-a-long-random-secret" \
+  npx -y @jkudish/jev-mcp --transport http
+```
+
+The process listens on `http://127.0.0.1:7337/mcp` by default. It requires a bearer token, keeps each MCP client's session separate, expires idle sessions after 30 minutes, and exposes an unauthenticated liveness check at `http://127.0.0.1:7337/healthz`. Provider credentials such as `TYPESAFE_API_KEY` still belong in the server process environment.
+
+Configure Codex to connect to that one process:
+
+```toml
+[mcp_servers.jev]
+url = "http://127.0.0.1:7337/mcp"
+bearer_token_env_var = "JEV_MCP_HTTP_BEARER_TOKEN"
+```
+
+Set `JEV_MCP_HTTP_BEARER_TOKEN` in the environment that launches Codex too; keep the value itself out of `config.toml`. The equivalent CLI registration is:
+
+```bash
+codex mcp add jev --url http://127.0.0.1:7337/mcp \
+  --bearer-token-env-var JEV_MCP_HTTP_BEARER_TOKEN
+```
+
+HTTP mode also accepts `--host`, `--port`, `--path`, and `--session-timeout-ms`. The matching environment variables are listed under [Configuration](#configuration). Binding beyond loopback sends the bearer token over the network; put the server behind TLS and appropriate network controls before doing that.
+
 ## The tools
 
 ### jev_verify
@@ -628,6 +656,12 @@ Jev is TypeSafe's System One model: it returns typed answers with calibrated pro
 | `JEV_API_BASE_URL` + `JEV_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `JEV_PROVIDER=compatible`. `JEV_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
 | `JEV_MCP_REQUEST_TIMEOUT_MS` | `60000` | Whole-request deadline in milliseconds, covering every attempt, on the fetch-based transports. |
 | `JEV_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on the fetch-based transports; retries happen only on 408, 409, 429, and 500 through 599. |
+| `JEV_MCP_TRANSPORT` | `stdio` | MCP transport: `stdio` or `http`. The `--transport` CLI option takes precedence. |
+| `JEV_MCP_HTTP_BEARER_TOKEN` | none | Required in HTTP mode. Every request to the MCP endpoint must use this bearer token. |
+| `JEV_MCP_HTTP_HOST` | `127.0.0.1` | HTTP listen host. The `--host` CLI option takes precedence. |
+| `JEV_MCP_HTTP_PORT` | `7337` | HTTP listen port. The `--port` CLI option takes precedence; `0` selects an ephemeral port. |
+| `JEV_MCP_HTTP_PATH` | `/mcp` | Streamable HTTP endpoint path. The `--path` CLI option takes precedence. |
+| `JEV_MCP_HTTP_SESSION_TIMEOUT_MS` | `1800000` | Idle session lifetime (30 minutes). The `--session-timeout-ms` CLI option takes precedence. |
 | `JEV_OPENROUTER_BASE_URL` | `https://openrouter.ai/api` | Override the OpenRouter API root (the `/alpha/decisions` path is appended; a trailing slash is tolerated). |
 | `JEV_CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Override the Cloudflare API root (`/accounts/<id>/ai/run` is appended; a trailing slash is tolerated). |
 
