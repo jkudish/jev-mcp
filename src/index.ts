@@ -20,6 +20,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { choice, noul, score } from "@typesafe-ai/sdk";
 import { z } from "zod";
 import { createRequire } from "node:module";
+import { Worker } from "node:worker_threads";
 import {
   classificationDecision,
   claimAction,
@@ -76,8 +77,6 @@ const MODEL = process.env.JEV_MCP_MODEL ?? "jev-latest";
 // Resolved at runtime so the MCP handshake version always matches the package.
 const { version: packageVersion } = createRequire(import.meta.url)("../package.json") as { version: string };
 
-const server = new McpServer({ name: "jev-mcp", version: packageVersion });
-
 import { askJev as askProvider } from "./provider.js";
 
 async function askJev(state: unknown, questions: Record<string, unknown>, signal?: AbortSignal) {
@@ -129,6 +128,9 @@ const candidatesSchema = z
   .min(1)
   .max(MAX_CANDIDATES)
   .describe(`Candidates to search. Up to ${MAX_CANDIDATES} in one call; texts are truncated at ${MAX_CANDIDATE_CHARS} chars.`);
+
+export function createJevServer() {
+  const server = new McpServer({ name: "jev-mcp", version: packageVersion });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_verify
@@ -892,7 +894,6 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_extract
 // ─────────────────────────────────────────────────────────────────────────────
-import { Worker } from "node:worker_threads";
 
 // Caller-supplied regex runs in a throwaway worker with a hard deadline, so a
 // catastrophic backtracking pattern can never hang the MCP server itself.
@@ -1586,8 +1587,12 @@ server.registerTool(
   },
 );
 
+  return server;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Boot
 // ─────────────────────────────────────────────────────────────────────────────
+const server = createJevServer();
 await server.connect(new StdioServerTransport());
 console.error(`[jev-mcp] ready — model ${MODEL}`);
