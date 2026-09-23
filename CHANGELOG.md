@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 - Transport resilience on the fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpoint): bounded jittered retries on 408, 409, 429, and 500 through 599 only; ambiguous network-level failures (connection reset, TLS errors) never retry, because without an idempotency key a re-send can double-process a paid call, and neither do caller cancellation, deadline expiry, non-retryable statuses, unparseable bodies, or oversized bodies. A whole-request deadline (`JEV_MCP_REQUEST_TIMEOUT_MS`, default 60000) covers every attempt and cuts backoff sleeps short; a 1,000,000-byte ceiling is enforced while the body streams rather than after buffering, on success and error bodies alike; MCP client cancellation is wired through to the HTTP request; and secret redaction covers every Cloudflare error path (HTTP status, `success:false`, non-Completed state) plus OpenRouter error bodies. The typesafe transport routes its SDK through standalone undici (`undici` 7.x) so wired-through cancellation cannot trigger SDK 0.6.0's open process-crash bug on Node 20/22 ([typesafe-sdk-js#2](https://github.com/typesafe-ai/typesafe-sdk-js/issues/2)), guarded by a child-process regression; the vercel transport remains SDK-owned, and no uniformity is claimed for either. New env overrides `JEV_OPENROUTER_BASE_URL` and `JEV_CLOUDFLARE_BASE_URL` point those transports at a private gateway. Via the research in [issue #23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.
 
