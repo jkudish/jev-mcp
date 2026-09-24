@@ -424,7 +424,9 @@ server.registerTool(
     }
     const results = rows.map((r) => {
       const p = r.probability as number;
-      const label = p >= autoAccept ? "likely" : p <= 1 - autoAccept ? "unlikely" : "uncertain";
+      // p + autoAccept <= 1 rather than p <= 1 - autoAccept: decimal
+      // subtraction (1 - 0.9 = 0.0999...) would misclassify p = 0.1.
+      const label = p >= autoAccept ? "likely" : p + autoAccept <= 1 ? "unlikely" : "uncertain";
       return { ...r, label, auto: label !== "uncertain" };
     });
     return text({

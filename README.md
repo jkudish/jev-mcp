@@ -213,7 +213,7 @@ All requested probabilities must be finite numbers in `[0,1]`; zero is valid. In
 
 Calibrated probability for propositions you state, in one batched call. Use it when you need a bare "how likely is this" rather than a relation to evidence.
 
-- `propositions`: up to 64 per call, 2000 chars each; a combined proposition-plus-context character budget guards request size.
+- `propositions`: up to 64 per call, 2000 chars each; a combined 150,000-character proposition-plus-context budget guards request size.
 - `context` is optional. Supplied context informs the judgment but is not a proof guarantee; without it, the model's own knowledge applies. To test claims strictly against evidence, including whether the evidence is merely silent, use [jev_verify](#jev_verify).
 - Each result carries `probability` plus a `label`: `likely` (at or above `auto_accept`), `unlikely` (at or below `1 - auto_accept`), or `uncertain` between them. `auto` means the label stands without review, in either direction.
 - `auto_accept` must exceed 0.5; default `0.85`. A missing or malformed answer fails closed with `invalid_response` and no label.

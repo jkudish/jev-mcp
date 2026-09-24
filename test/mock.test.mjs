@@ -709,6 +709,45 @@ test("jev_noul rejects blank propositions, low thresholds, and oversized batches
   );
 });
 
+test("jev_noul labels the exact boundaries, including the decimal-subtraction case", async () => {
+  await withMock(
+    () => ({ p_proposition0: { noul: 0.9 }, p_proposition1: { noul: 0.1 }, p_proposition2: { noul: 0.11 } }),
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_noul",
+        arguments: {
+          propositions: ["Exactly at the threshold", "Exactly at 1 minus the threshold", "Just inside the uncertain band"],
+          auto_accept: 0.9,
+        },
+      });
+      assert.notEqual(result.isError, true);
+      const body = payload(result);
+      assert.equal(body.status, "ok");
+      // 1 - 0.9 is 0.0999... in decimal arithmetic; p = 0.1 must still be
+      // unlikely, and p = 0.11 (0.11 + 0.9 > 1) must stay uncertain.
+      assert.deepEqual(body.results.map((r) => r.label), ["likely", "unlikely", "uncertain"]);
+      assert.deepEqual(body.results.map((r) => r.auto), [true, true, false]);
+    },
+  );
+});
+
+test("jev_noul refuses an over-budget batch before any request is sent", async () => {
+  await withMock(
+    () => ({}),
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_noul",
+        arguments: {
+          propositions: Array.from({ length: 64 }, () => "A".repeat(2000)),
+          context: "B".repeat(22001),
+        },
+      });
+      assert.equal(result.isError, true);
+      assert.equal(requests.length, 0);
+    },
+  );
+});
+
 test("compatible provider fails closed in the tools for answers malformed per question", async () => {
   // Per-question validity is the tools' job: each malformed answer surfaces
   // as structured invalid_response output, not a transport abort.
