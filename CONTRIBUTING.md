@@ -10,7 +10,7 @@ npm run build
 npm run typecheck
 ```
 
-Node.js 20 or newer. TypeScript, ESM, no runtime dependencies beyond the MCP SDK, the TypeSafe SDK, and zod.
+Node.js 22 or newer. TypeScript, ESM; runtime dependencies include the MCP SDK, TypeSafe SDK, Jev agent tools, and zod.
 
 ## Tests
 

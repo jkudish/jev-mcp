@@ -160,6 +160,15 @@ test("compatible provider auto-selects when it is the only configured provider",
   );
 });
 
+test("compatible auto-selection tolerates an incomplete Cloudflare credential pair", async () => {
+  await withMock((request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client) => {
+      const body = payload(await client.callTool({ name: "jev_verify", arguments: VERIFY_ARGS }));
+      assert.equal(body.provider, "compatible");
+      assert.equal(body.results[0].verdict, "verified");
+    }, (port) => compatibleEnv(port, { JEV_PROVIDER: "auto", TYPESAFE_API_KEY: "", CLOUDFLARE_API_TOKEN: "incomplete" }));
+});
+
 test("compatible provider rejects a malformed response", async () => {
   await withMock(
     null,
@@ -1401,6 +1410,65 @@ test("jev_verify still returns verified verdicts on a complete response", async 
       usage: { input_tokens: 10, output_tokens: 10 },
     });
   });
+});
+
+test("TypeSafe package rejection invalidates only the malformed judgment without another paid request", async () => {
+  await withMock(() => ({
+    relation_claim0: pick("supports", ["supports", "contradicts", "says_nothing"]),
+    relation_claim1: { ...pick("supports", ["supports", "contradicts", "says_nothing"]), confidence: "bad" },
+  }), async (client, requests) => {
+    const result = await client.callTool({ name: "jev_verify", arguments: {
+      claims: ["First claim", "Second claim"], evidence: "Evidence",
+    } });
+    assert.notEqual(result.isError, true);
+    const body = payload(result);
+    assert.equal(body.results[0].verdict, "verified");
+    assert.equal(body.results[1].status, "invalid_response");
+    assert.equal(requests.length, 1);
+  });
+});
+
+test("TypeSafe package invalid usage becomes structured invalid_response", async () => {
+  await withMock(() => ({ relation_claim0: pick("supports", ["supports", "contradicts", "says_nothing"]) }), async (client) => {
+    const result = await client.callTool({ name: "jev_verify", arguments: VERIFY_ARGS });
+    assert.notEqual(result.isError, true);
+    assert.equal(payload(result).results[0].status, "invalid_response");
+  }, {}, { usage: { input_tokens: -1, output_tokens: 2 } });
+});
+
+for (const usage of [null, [], "bad"]) {
+  test(`TypeSafe malformed usage container ${String(usage)} stays structured`, async () => {
+    await withMock(() => ({ relation_claim0: pick("supports", ["supports", "contradicts", "says_nothing"]) }),
+      async (client) => {
+        const result = await client.callTool({ name: "jev_verify", arguments: VERIFY_ARGS });
+        assert.notEqual(result.isError, true);
+        assert.equal(payload(result).results[0].status, "invalid_response");
+      }, {}, { raw: JSON.stringify({ answers: { relation_claim0: pick("supports", ["supports", "contradicts", "says_nothing"]) }, usage }) });
+  });
+}
+
+test("a wrong explicit answer type invalidates only its claim, with one request", async () => {
+  await withMock(() => ({
+    relation_claim0: pick("supports", ["supports", "contradicts", "says_nothing"]),
+    relation_claim1: { ...pick("supports", ["supports", "contradicts", "says_nothing"]), type: "score" },
+  }), async (client, requests) => {
+    const result = await client.callTool({ name: "jev_verify", arguments: {
+      claims: ["First claim", "Second claim"], evidence: "Evidence",
+    } });
+    assert.notEqual(result.isError, true);
+    assert.equal(payload(result).results[0].verdict, "verified");
+    assert.equal(payload(result).results[1].status, "invalid_response");
+    assert.equal(requests.length, 1);
+  });
+});
+
+test("empty JEV_PROVIDER selects TypeSafe through both resolver calls", async () => {
+  await withMock(() => ({ relation_claim0: pick("supports", ["supports", "contradicts", "says_nothing"]) }),
+    async (client) => {
+      const body = payload(await client.callTool({ name: "jev_verify", arguments: VERIFY_ARGS }));
+      assert.equal(body.provider, "typesafe");
+      assert.equal(body.results[0].verdict, "verified");
+    }, { JEV_PROVIDER: "" });
 });
 
 const RELATION_KEYS = ["supports", "contradicts", "says_nothing"];

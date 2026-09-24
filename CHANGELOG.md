@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Use `@jkudish/jev-agent-tools` for built-in provider selection and direct TypeSafe/Vercel judgments; retain MCP-specific retry and compatible endpoint handling.
+
 ## 0.6.0
 
 - Transport resilience: bounded retries on 408, 429, and 5xx only; ambiguous network failures never retry, so a paid call cannot double-process. Adds a request deadline, a 1 MB body ceiling, and cancellation wiring. Via [#23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.

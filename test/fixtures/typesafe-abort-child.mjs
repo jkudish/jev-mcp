@@ -1,12 +1,6 @@
-// Spawned by typesafe-abort-regression.test.mjs. Exercises the built
-// provider's typesafe transport with a cancellation that lands after response
-// headers while the body is still streaming: the exact scenario where SDK
-// 0.6.0 on Node 20/22 terminates the process through the bundled undici
-// clone/cancel abort path (typesafe-sdk-js#2) even though the caller catches.
-// provider.ts routes the SDK through standalone undici (which carries the
-// upstream fix, nodejs/undici#4804), so this child must exit 0. It runs in a
-// child process because the failure mode is an unhandled native rejection that
-// kills the process after the caller already caught the SDK's error.
+// Spawned by typesafe-abort-regression.test.mjs. Cancel the package's direct
+// TypeSafe transport after headers while the response body is still streaming.
+// The child must exit normally after the cancellation is handled.
 import { createServer } from "node:http";
 import { askJev } from "../../dist/provider.js";
 
