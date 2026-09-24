@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0
+
+- New `jev_noul` tool: batched calibrated probability for stated propositions, labeled likely / unlikely / uncertain. Prompted by [#31](https://github.com/jkudish/jev-mcp/issues/31).
+
 ## 0.7.0
 
 - Use `@jkudish/jev-agent-tools` for built-in provider selection and direct TypeSafe/Vercel judgments; retain MCP-specific retry and compatible endpoint handling.

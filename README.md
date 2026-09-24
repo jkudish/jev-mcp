@@ -5,10 +5,11 @@
 
 Fast, cheap, typed judgments from TypeSafe's Jev model, as MCP tools.
 
-Give your agent ten judgment tools:
+Give your agent eleven judgment tools:
 
 - `jev_verify` checks claims against evidence.
 - `jev_screen` judges content before it enters context.
+- `jev_noul` returns a calibrated probability for a stated proposition.
 - `jev_find` picks the best candidate by meaning.
 - `jev_rerank` scores and sorts every candidate.
 - `jev_classify` batch-assigns items to classes.
@@ -207,6 +208,15 @@ All requested probabilities must be finite numbers in `[0,1]`; zero is valid. In
 - Low substance or relevance yields `skip`: the page is not worth reading.
 - `block_at` (default `0.75`) and `review_at` (default `0.25`) are thresholds on the injection probability. Both are parameters.
 - Pattern from the [guardrails cookbook](https://docs.typesafe.ai/cookbooks/llm_guardrails).
+
+### jev_noul
+
+Calibrated probability for propositions you state, in one batched call. Use it when you need a bare "how likely is this" rather than a relation to evidence.
+
+- `propositions`: up to 64 per call, 2000 chars each; a combined proposition-plus-context character budget guards request size.
+- `context` is optional. Supplied context informs the judgment but is not a proof guarantee; without it, the model's own knowledge applies. To test claims strictly against evidence, including whether the evidence is merely silent, use [jev_verify](#jev_verify).
+- Each result carries `probability` plus a `label`: `likely` (at or above `auto_accept`), `unlikely` (at or below `1 - auto_accept`), or `uncertain` between them. `auto` means the label stands without review, in either direction.
+- `auto_accept` must exceed 0.5; default `0.85`. A missing or malformed answer fails closed with `invalid_response` and no label.
 
 ### jev_find
 
@@ -531,6 +541,7 @@ The two true claims verify at full confidence, and the one that matters, "the fu
 
 - `jev_verify`: one or more claims against evidence you already have.
 - `jev_screen`: fetched or pasted content, before it enters context.
+- `jev_noul`: a bare calibrated probability for a stated proposition.
 - `jev_find`: pick the single best candidate from up to 250.
 - `jev_rerank`: score and sort the whole list.
 - `jev_classify`: label many items against your own catalog, in batches.

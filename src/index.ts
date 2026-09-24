@@ -6,6 +6,7 @@
 //
 //   jev_verify   — check claims against evidence (citation-check pattern)
 //   jev_screen   — guardrail fetched/external text before it enters context
+//   jev_noul     — calibrated probability for stated propositions
 //   jev_find     — semantic search over candidates, no embeddings required
 //   jev_classify — batch-assign items to classes from a shared catalog
 //   jev_decide   — bounded multi-candidate decision with requirement checks
@@ -43,6 +44,9 @@ import {
   MAX_GATE_CLAIMS,
   MAX_GATE_EVIDENCE_CHARS,
   MAX_GATE_EVIDENCE_ITEMS,
+  MAX_PROPOSITIONS,
+  MAX_PROPOSITION_CHARS,
+  MAX_NOUL_TOTAL_CHARS,
   MAX_CLAIM_CHARS,
   MAX_REVIEW_DOC_CHARS,
   normalizeEvidence,
@@ -324,6 +328,112 @@ server.registerTool(
       probabilities: { injection, substance, relevance: relevance ?? null },
       thresholds: { block_at: blockAt, review_at: reviewAt },
       recommendation,
+      usage,
+    });
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// jev_noul
+// ─────────────────────────────────────────────────────────────────────────────
+server.registerTool(
+  "jev_noul",
+  {
+    title: "Calibrated probability for propositions",
+    description:
+      "Return a calibrated probability for each stated proposition with TypeSafe Jev, in one batched request: " +
+      "high means likely, low means unlikely, middling means genuinely uncertain. Supplied context informs the " +
+      "judgment but is not a proof guarantee; to test claims strictly against evidence, including whether the " +
+      "evidence is merely silent, use jev_verify instead.",
+    inputSchema: strictShape({
+      propositions: z
+        .array(z.string().min(1).max(MAX_PROPOSITION_CHARS))
+        .min(1)
+        .max(MAX_PROPOSITIONS)
+        .refine((arr) => arr.every((p) => p.trim().length > 0), {
+          message: "propositions must not be blank",
+        })
+        .describe(
+          `Propositions to judge, each a single testable statement. Up to ${MAX_PROPOSITIONS} per call, ${MAX_PROPOSITION_CHARS} chars each.`,
+        ),
+      context: evidenceSchema.optional().describe(
+        "Optional context the propositions are judged against: one document or evidence items. When omitted, the model's own knowledge applies.",
+      ),
+      auto_accept: z
+        .number()
+        .gt(0.5)
+        .max(1)
+        .optional()
+        .describe(
+          "Decisiveness threshold: probability at or above this marks the proposition likely, at or below (1 - this) unlikely, between them uncertain. Must exceed 0.5. Default 0.85.",
+        ),
+    }),
+  },
+  async ({ propositions, context: rawContext, auto_accept }, extra) => {
+    const autoAccept = auto_accept ?? 0.85;
+
+    const contextItems =
+      typeof rawContext === "string"
+        ? [{ id: "context", text: rawContext }]
+        : Array.isArray(rawContext)
+          ? rawContext
+          : rawContext
+            ? [rawContext]
+            : [];
+    const { items } = ensureUniqueIds(propositions.map((text) => ({ text })), "proposition");
+    const totalChars =
+      items.reduce((n, p) => n + p.text.length, 0) + contextItems.reduce((n, c) => n + c.text.length, 0);
+    if (totalChars > MAX_NOUL_TOTAL_CHARS) {
+      throw new Error(
+        `Batch too large: ${totalChars} proposition and context characters exceeds the ${MAX_NOUL_TOTAL_CHARS} character budget. Split the batch.`,
+      );
+    }
+
+    // One Noul per proposition. The framing is about the proposition itself,
+    // so a low probability means likely-not-true, not merely unevidenced;
+    // evidence-relation judgments (including silence) belong to jev_verify.
+    const questions: Record<string, unknown> = {};
+    for (const p of items) {
+      questions[`p_${p.id}`] = noul(`proposition \`${p.id}\`: ${p.text}`, {
+        true: "The proposition is likely true, given the supplied context (when present) and general knowledge",
+        false: "The proposition is likely not true",
+      });
+    }
+
+    const state = { propositions: items, context: contextItems.length ? contextItems : null };
+    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+
+    const rows = items.map((p) => ({
+      id: p.id,
+      proposition: p.text,
+      probability: validateNoulAnswer(answers[`p_${p.id}`]),
+    }));
+    if (rows.some((r) => r.probability === null)) {
+      // Fail closed: a missing or malformed probability must never surface as
+      // a label or an auto classification, and no `auto: true` may appear.
+      return text({
+        tool: "jev_noul",
+        model,
+        provider,
+        status: "invalid_response",
+        results: rows.map((r) => ({ ...r, label: null, auto: false })),
+        invalid: rows.filter((r) => r.probability === null).map((r) => r.id),
+        thresholds: { auto_accept: autoAccept },
+        usage,
+      });
+    }
+    const results = rows.map((r) => {
+      const p = r.probability as number;
+      const label = p >= autoAccept ? "likely" : p <= 1 - autoAccept ? "unlikely" : "uncertain";
+      return { ...r, label, auto: label !== "uncertain" };
+    });
+    return text({
+      tool: "jev_noul",
+      model,
+      provider,
+      status: "ok",
+      results,
+      thresholds: { auto_accept: autoAccept },
       usage,
     });
   },

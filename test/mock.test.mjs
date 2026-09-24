@@ -613,6 +613,102 @@ test("compatible provider fails closed in the tool when an answer is missing", a
   );
 });
 
+test("jev_noul labels decisive probabilities and routes context through state", async () => {
+  await withMock(
+    () => ({ p_proposition0: { noul: 0.93 }, p_proposition1: { noul: 0.08 }, p_proposition2: { noul: 0.5 } }),
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_noul",
+        arguments: {
+          propositions: ["Paris is the capital of France", "The moon is made of cheese", "A fair coin lands heads"],
+          context: "General knowledge, no supplied documents.",
+        },
+      });
+      assert.notEqual(result.isError, true);
+      const body = payload(result);
+      assert.equal(body.status, "ok");
+      assert.deepEqual(
+        body.results.map((r) => [r.label, r.auto]),
+        [
+          ["likely", true],
+          ["unlikely", true],
+          ["uncertain", false],
+        ],
+      );
+      // One Noul per proposition; ids carry through to the question keys.
+      const questions = Object.keys(requests[0].body.questions);
+      assert.equal(questions.length, 3);
+      for (const r of body.results) {
+        assert.ok(questions.includes(`p_${r.id}`));
+      }
+      assert.equal(requests[0].body.state.context[0].text, "General knowledge, no supplied documents.");
+    },
+  );
+});
+
+test("jev_noul omits context from state when none is supplied", async () => {
+  await withMock(
+    () => ({ p_proposition0: { noul: 0.9 } }),
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_noul",
+        arguments: { propositions: ["Paris is the capital of France"] },
+      });
+      assert.notEqual(result.isError, true);
+      assert.equal(payload(result).status, "ok");
+      assert.equal(requests[0].body.state.context, null);
+    },
+  );
+});
+
+test("jev_noul fails closed on malformed answers without any auto classification", async () => {
+  await withMock(
+    () => ({ p_proposition0: { noul: 1.5 }, p_proposition1: { noul: 0.9 } }),
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_noul",
+        arguments: { propositions: ["The patch is ready", "The tests pass"] },
+      });
+      assert.notEqual(result.isError, true);
+      const body = payload(result);
+      assert.equal(body.status, "invalid_response");
+      assert.deepEqual(body.invalid, [body.results[0].id]);
+      assert.equal(body.results[0].probability, null);
+      assert.equal(body.results[0].label, null);
+      assert.equal(body.results[0].auto, false);
+      assert.equal(body.results[1].probability, 0.9);
+      assert.equal(body.results.every((r) => r.auto === false), true);
+    },
+  );
+});
+
+test("jev_noul rejects blank propositions, low thresholds, and oversized batches", async () => {
+  await withMock(
+    () => ({}),
+    async (client) => {
+      const blank = await client.callTool({
+        name: "jev_noul",
+        arguments: { propositions: ["   "] },
+      });
+      assert.equal(blank.isError, true);
+
+      const lowThreshold = await client.callTool({
+        name: "jev_noul",
+        arguments: { propositions: ["A testable statement"], auto_accept: 0.5 },
+      });
+      assert.equal(lowThreshold.isError, true);
+
+      const oversized = await client.callTool({
+        name: "jev_noul",
+        arguments: {
+          propositions: Array.from({ length: 65 }, () => "A testable statement"),
+        },
+      });
+      assert.equal(oversized.isError, true);
+    },
+  );
+});
+
 test("compatible provider fails closed in the tools for answers malformed per question", async () => {
   // Per-question validity is the tools' job: each malformed answer surfaces
   // as structured invalid_response output, not a transport abort.

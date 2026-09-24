@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for considering a contribution. This is a small server with a narrow scope: ten MCP tools over TypeSafe's Jev, with question design kept in the server so every caller gets well-formed judgments.
+Thanks for considering a contribution. This is a small server with a narrow scope: eleven MCP tools over TypeSafe's Jev, with question design kept in the server so every caller gets well-formed judgments.
 
 ## Development
 
@@ -27,7 +27,7 @@ Both suites must pass before a pull request can merge. If you add behavior, add 
 
 - Keep changes small and scoped to one tool or one helper.
 - New judgments belong in the tool questions and criteria, not in post-processing that second-guesses the model.
-- Do not add tools without opening an issue first describing the judgment you want and why the existing three do not cover it.
+- Do not add tools without opening an issue first describing the judgment you want and why the existing eleven do not cover it.
 - Update the README example for any tool whose arguments or results change.
 
 ## Notes

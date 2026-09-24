@@ -174,6 +174,15 @@ export const MAX_RERANK_CANDIDATES = 250;
 /** Aggregate candidate-text budget for jev_rerank (characters, across all candidates). */
 export const MAX_RERANK_TOTAL_CHARS = 100_000;
 
+/** Max propositions for jev_noul (independent Noul questions). */
+export const MAX_PROPOSITIONS = 64;
+
+/** Max characters per jev_noul proposition. */
+export const MAX_PROPOSITION_CHARS = 2000;
+
+/** Aggregate proposition plus context budget for jev_noul (characters). */
+export const MAX_NOUL_TOTAL_CHARS = 150_000;
+
 /** Max aspects for jev_compare (independent per-aspect Choices). */
 export const MAX_COMPARE_ASPECTS = 10;
 
