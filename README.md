@@ -3,6 +3,10 @@
 [![CI](https://github.com/jkudish/jev-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jkudish/jev-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+<p align="center">
+  <img src=".github/jev-mcp-og.png" alt="jev-mcp — Fast, cheap, typed judgments from TypeSafe's Jev model, as MCP tools." />
+</p>
+
 Fast, cheap, typed judgments from TypeSafe's Jev model, as MCP tools.
 
 Give your agent eleven judgment tools:
