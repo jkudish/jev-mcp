@@ -38,7 +38,7 @@ function payload(result) {
   return JSON.parse(block.text);
 }
 
-test("lists the ten tools", { skip: !hasKey }, async () => {
+test("lists the eleven tools", { skip: !hasKey }, async () => {
   await withClient(async (client) => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
@@ -49,11 +49,32 @@ test("lists the ten tools", { skip: !hasKey }, async () => {
       "jev_extract",
       "jev_find",
       "jev_gate",
+      "jev_noul",
       "jev_rerank",
       "jev_review",
       "jev_screen",
       "jev_verify",
     ]);
+  });
+});
+
+test("jev_noul returns calibrated probabilities for propositions", { skip: !hasKey }, async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "jev_noul",
+      arguments: {
+        propositions: ["Paris is the capital of France", "The moon is made entirely of cheese"],
+      },
+    });
+    assert.notEqual(result.isError, true);
+    const body = payload(result);
+    assert.equal(body.tool, "jev_noul");
+    assert.equal(body.status, "ok");
+    assert.equal(body.results.length, 2);
+    assert.equal(body.results[0].label, "likely");
+    assert.ok(body.results[0].probability > 0.5);
+    assert.equal(body.results[1].label, "unlikely");
+    assert.ok(body.results[1].probability < 0.5);
   });
 });
 
