@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 - Use `@jkudish/jev-agent-tools` for built-in provider selection and direct TypeSafe/Vercel judgments; retain MCP-specific retry and compatible endpoint handling.
+- Node.js 22 or newer is required (was 20); the shared wire package declares it.
+- Docs: provider setup notes and a pointer to the shared package's add-a-provider guide.
 
 ## 0.6.0
 

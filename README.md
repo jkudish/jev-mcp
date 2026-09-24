@@ -660,6 +660,8 @@ export JEV_MCP_MODEL=openjev
 
 The server sends `POST` requests with `{ model, state, questions }` and requires the standard response shape: an `answers` object plus a `usage` object reporting `input_tokens` and `output_tokens`, with an optional `model` string echoing the model that answered. Envelope problems (a non-object body or `answers`, malformed `usage` counts, a non-string `model`) are rejected at the transport boundary. Individual answers are not judged here: each tool validates them under its own `invalid_response` contract, so a missing or malformed answer fails closed in the tool instead of aborting the call. `JEV_API_BASE_URL` must be the full endpoint URL including the `/v1/systemone` path; it is used verbatim, with no trailing-slash or path normalization. The endpoint and credentials are kept in the local process environment. This adapter is provider-neutral; OpenJEV is one example, not a hard-coded dependency.
 
+Need a carrier that is not built in? The [add-a-provider guide](https://github.com/jkudish/jev-agent-tools#adding-a-provider) in the shared wire package covers the options; this server's no-code path is the compatible endpoint above.
+
 ## Also in the family
 
 Need those judgments to drive a real browser? [Jev Browser](https://github.com/jkudish/jev-browser) gives an agent a task and a URL and lets Jev pick the actions: click, type, select, stop. It uses the same judgment style this server exposes. The npm package is [@jkudish/jev-browser](https://www.npmjs.com/package/@jkudish/jev-browser).
