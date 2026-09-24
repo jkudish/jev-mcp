@@ -608,6 +608,8 @@ Then decide the route, feeding that answer in as evidence. The `requirements` fi
 
 Jev is TypeSafe's System One model: it returns typed answers with calibrated probability distributions, not generated text. A verify call is a Choice over supports / contradicts / says_nothing, so you see the whole distribution, not one label. A screen call is a set of yes/no probabilities. A find call is a Choice over your candidate ids plus an existence check. A rerank call is one yes/no relevance question per candidate. A compare call is a Choice over three relations, repeated independently per aspect. An extract call is a Choice over the candidates your regex already found, so the model picks a value but never writes one. A review call is four Score rubrics plus one safe-to-apply probability; a gate adds one Choice per completion claim, judged from evidence only. Code maps the answers to verdicts and actions; policy stays with you.
 
+For Choice and Score, `confidence` measures how peaked the option probabilities are, scaled from 0 for a uniform distribution to 1 for all probability on one option; it is not the probability the answer is correct, so tune thresholds against observed outcomes.
+
 ## Limits and tuning
 
 - Thresholds (`auto_accept`, `block_at`, `review_at`, exists cutoffs) are starting points from the TypeSafe cookbooks. Tune them against your own data before you enforce them. See [how TypeSafe reports confidence](https://docs.typesafe.ai/confidence.md).
