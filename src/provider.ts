@@ -3,9 +3,7 @@
 // speak the {state, questions} / answers contract; URL, auth, and model slugs
 // differ. Proxies add hops, so direct TypeSafe remains the recommended default.
 
-import { experimental_evaluate } from "ai";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
-import { fetch as undiciFetch } from "undici";
+import { ask, resolveTransport, type JevTransport, type JevTransportReply } from "@jkudish/jev-agent-tools";
 import { isRecord } from "./lib.js";
 
 export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible";
@@ -217,43 +215,9 @@ async function fetchWithResilience(url: string, init: RequestInit, deadline: Dea
   }
 }
 
-let typesafeClient: TypeSafeClient | null = null;
-
-// SDK 0.6.0 on Node 20/22: cancelling a call after response headers terminates
-// the process through the bundled undici clone/cancel abort path, even when the
-// caller catches the SDK's APIUserAbortError (typesafe-sdk-js#2; fixed upstream
-// in nodejs/undici#4804, bundled from Node 24). Route the SDK through the
-// standalone undici fetch, which carries the fix, so wired-through cancellation
-// stays safe on every supported Node. Verified with a child-process regression
-// on Node 22.23.1: the default fetch exits the process on a handled abort;
-// this injection exits 0. Remove when the SDK ships a fixed release.
-const typesafeFetch = (input: string, init?: RequestInit): Promise<Response> =>
-  undiciFetch(input, init as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
-
 function resolve(env: NodeJS.ProcessEnv): JevProvider {
   const explicit = (env.JEV_PROVIDER ?? "auto").toLowerCase();
-  const hasTypesafe = Boolean(env.TYPESAFE_API_KEY);
-  const hasOpenRouter = /^sk-or-/.test(env.OPENROUTER_API_KEY ?? "");
-  const cfToken = env.JEV_CLOUDFLARE_API_TOKEN || env.CLOUDFLARE_API_TOKEN;
-  const hasCloudflare = Boolean(cfToken && env.CLOUDFLARE_ACCOUNT_ID);
   const hasCompatible = Boolean(env.JEV_API_KEY && env.JEV_API_BASE_URL);
-
-  if (explicit === "typesafe") {
-    if (!hasTypesafe) throw new Error("JEV_PROVIDER=typesafe but TYPESAFE_API_KEY is not set.");
-    return "typesafe";
-  }
-  if (explicit === "openrouter") {
-    if (!hasOpenRouter) throw new Error("JEV_PROVIDER=openrouter but OPENROUTER_API_KEY is not set or not an sk-or- key.");
-    return "openrouter";
-  }
-  if (explicit === "vercel") {
-    if (!env.AI_GATEWAY_API_KEY) throw new Error("JEV_PROVIDER=vercel but AI_GATEWAY_API_KEY is not set.");
-    return "vercel";
-  }
-  if (explicit === "cloudflare") {
-    if (!hasCloudflare) throw new Error("JEV_PROVIDER=cloudflare but a Cloudflare API token (CLOUDFLARE_API_TOKEN or JEV_CLOUDFLARE_API_TOKEN) and CLOUDFLARE_ACCOUNT_ID are not both set.");
-    return "cloudflare";
-  }
   if (explicit === "compatible") {
     const missing = ["JEV_API_KEY", "JEV_API_BASE_URL"].filter((name) => !env[name]);
     if (missing.length > 0) {
@@ -264,44 +228,12 @@ function resolve(env: NodeJS.ProcessEnv): JevProvider {
     }
     return "compatible";
   }
-  if (hasTypesafe) return "typesafe";
-  if (hasOpenRouter) return "openrouter";
-  if (hasCloudflare) return "cloudflare";
-  if (env.AI_GATEWAY_API_KEY) return "vercel";
-  if (hasCompatible) return "compatible";
-  throw new Error(
-    "No Jev provider credentials found. Set TYPESAFE_API_KEY, OPENROUTER_API_KEY (sk-or-), Cloudflare token + CLOUDFLARE_ACCOUNT_ID, AI_GATEWAY_API_KEY, or JEV_API_KEY + JEV_API_BASE_URL; set JEV_PROVIDER to choose explicitly.",
-  );
-}
-
-// Normalize the AI SDK evaluate envelope without making a provider request.
-export function adaptVercelAnswers(result: {
-  answers?: Record<string, any> | null;
-  providerMetadata?: Record<string, any> | null;
-}): Record<string, any> {
-  const confidence = (result.providerMetadata?.typesafe?.confidence ?? {}) as Record<string, number>;
-  const adapted: Record<string, any> = {};
-  for (const [id, answer] of Object.entries((result.answers ?? {}) as Record<string, any>)) {
-    if (answer?.type === "boolean") {
-      adapted[id] = { type: "noul", noul: answer.probability };
-    } else if (answer?.type === "choice") {
-      // A distribution the upstream answer did not carry stays absent rather
-      // than becoming {}: score tools treat an absent distribution as "not
-      // reported" (still valid) and a present-but-malformed one as invalid;
-      // choice tools require a distribution, so absence and {} both fail
-      // their validation identically either way.
-      adapted[id] = answer.probabilities != null
-        ? { type: "choice", choice: answer.choice, probabilities: answer.probabilities, confidence: confidence[id] ?? null }
-        : { type: "choice", choice: answer.choice, confidence: confidence[id] ?? null };
-    } else if (answer?.type === "score") {
-      adapted[id] = answer.probabilities != null
-        ? { type: "score", score: answer.score, probabilities: answer.probabilities, confidence: confidence[id] ?? null }
-        : { type: "score", score: answer.score, confidence: confidence[id] ?? null };
-    } else {
-      adapted[id] = answer;
-    }
-  }
-  return adapted;
+  // The published package owns the four built-in credential rules and order.
+  if ((explicit === "auto" || explicit === "") && hasCompatible &&
+      !env.TYPESAFE_API_KEY && !/^sk-or-/.test(env.OPENROUTER_API_KEY ?? "") &&
+      !((env.JEV_CLOUDFLARE_API_TOKEN || env.CLOUDFLARE_API_TOKEN) && env.CLOUDFLARE_ACCOUNT_ID) &&
+      !env.AI_GATEWAY_API_KEY) return "compatible";
+  return resolveTransport({ ...env, JEV_PROVIDER: explicit || "auto" }).name as JevProvider;
 }
 
 export async function askJev(
@@ -312,23 +244,50 @@ export async function askJev(
 ): Promise<AskResult> {
   const provider = resolve(process.env);
 
-  if (provider === "typesafe") {
-    typesafeClient ??= new TypeSafeClient({
-      ...(process.env.TYPESAFE_BASE_URL ? { baseURL: process.env.TYPESAFE_BASE_URL } : undefined),
-      fetch: typesafeFetch,
-    });
-    const response = await (
-      typesafeClient.systemOne as unknown as (
-        payload: { state: unknown; questions: Record<string, unknown>; model?: string },
-        options?: { signal?: AbortSignal },
-      ) => Promise<any>
-    )({ state, questions, model }, { signal });
-    return {
-      answers: response.answers,
-      usage: { input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0 },
-      provider,
-      model,
+  if (provider === "typesafe" || provider === "vercel") {
+    // Keep the raw envelope for MCP's per-judgment invalid_response behavior:
+    // the shared package rejects a whole batch if even one answer is invalid.
+    const builtin = resolveTransport({ ...process.env, JEV_PROVIDER: process.env.JEV_PROVIDER || "auto" });
+    let reply: JevTransportReply | undefined;
+    const transport: JevTransport = {
+      name: builtin.name,
+      async ask(input) {
+        try {
+          return reply = await builtin.ask(input);
+        } catch (error) {
+          // Both published drivers throw on an invalid usage *container* before
+          // the Result validator sees it. Preserve the validation path, not a
+          // misleading request_failed network error. Never reinterpret other
+          // transport exceptions (including cancellation).
+          if (error instanceof Error && (error.message === "TypeSafe API invalid usage (response omitted)" ||
+              error.message === "Vercel AI Gateway invalid usage (response omitted)")) {
+            return reply = { answers: {}, usage: { input_tokens: 0, output_tokens: 0 }, model: input.model };
+          }
+          throw error;
+        }
+      },
     };
+    const result = await ask({ state, questions, model, signal: signal ?? new AbortController().signal }, { transport });
+    if (!result.ok) {
+      if (result.code === "request_failed") throw new Error(result.message);
+      // Envelope validation cannot be projected to individual judgments.
+      // A bad envelope invalidates the call's judgments, not the MCP call.
+      if (!isRecord(reply?.answers) || result.code === "invalid_usage" || result.code === "invalid_model" ||
+          !Number.isSafeInteger(reply.usage?.input_tokens) || reply.usage.input_tokens < 0 ||
+          !Number.isSafeInteger(reply.usage?.output_tokens) || reply.usage.output_tokens < 0 ||
+          typeof reply.model !== "string" || !reply.model.trim() ||
+          (result.code === "answer_id_mismatch" && Object.keys(reply.answers).some((id) => !Object.hasOwn(questions, id)))) {
+        return { answers: {}, usage: { input_tokens: 0, output_tokens: 0 }, provider, model };
+      }
+      const answers = Object.fromEntries(Object.entries(reply.answers).filter(([id, answer]) =>
+        !isRecord(answer) || !Object.hasOwn(answer, "type") || answer.type === (questions[id] as { type?: unknown } | undefined)?.type,
+      ));
+      // Package rejection is batch-wide; the existing per-tool guards are
+      // authoritative for answer validity, including optional score
+      // distributions, fractional scores, and valid sibling judgments.
+      return { answers, usage: reply.usage, provider, model: reply.model };
+    }
+    return { answers: result.answer, usage: result.usage, provider, model: result.model };
   }
 
   if (provider === "openrouter") {
@@ -423,33 +382,6 @@ export async function askJev(
       deadline.dispose();
     }
   }
-
-  if (provider === "vercel") {
-  // Vercel AI Gateway exposes Jev through the AI SDK's experimental evaluate
-  // API: "noul" questions become "boolean", answers return as probabilities,
-  // and Choice/Score confidence lives in providerMetadata.typesafe.
-  const vercelQuestions: Record<string, any> = {};
-  for (const [id, question] of Object.entries(questions)) {
-    const q = question as { type: string; instructions?: unknown; criteria?: unknown };
-    vercelQuestions[id] = {
-      type: q.type === "noul" ? "boolean" : q.type,
-      instructions: q.instructions,
-      criteria: q.criteria,
-    };
-  }
-  const result = await experimental_evaluate({
-    model: model.startsWith("typesafe-ai/") ? model : "typesafe-ai/jev",
-    state: state as any,
-    questions: vercelQuestions as any,
-    abortSignal: signal,
-  });
-  return {
-    answers: adaptVercelAnswers(result),
-    usage: { input_tokens: result.usage?.inputTokens ?? 0, output_tokens: result.usage?.outputTokens ?? 0 },
-    provider,
-    model: "typesafe-ai/jev",
-  };
-}
 
   // Cloudflare Workers AI wraps the same contract in {model, input} and the
   // v4 {result, success} envelope. Single alias; no version pinning.

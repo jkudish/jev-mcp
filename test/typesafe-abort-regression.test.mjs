@@ -1,9 +1,6 @@
-// Regression for typesafe-sdk-js#2: a handled systemOne cancellation after
-// response headers must not terminate the process on Node 20/22. The SDK's
-// bundled-undici clone/cancel path is fixed upstream in nodejs/undici#4804
-// (bundled from Node 24), and provider.ts injects standalone undici into the
-// SDK to carry that fix on every supported Node. On Node >= 24 this test
-// passes trivially (the bug is absent); CI's Node 22 job is where it bites.
+// A handled direct TypeSafe cancellation after response headers must not
+// terminate the process. The package uses fetch rather than the old SDK's
+// bundled-undici clone/cancel path (typesafe-sdk-js#2).
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -18,6 +15,6 @@ test("handled typesafe cancellation after response headers exits the child proce
   child.stderr.on("data", (chunk) => (out += chunk));
   const code = await new Promise((resolve) => child.on("close", resolve));
   assert.equal(code, 0, `child exited ${code}:\n${out}`);
-  assert.match(out, /CAUGHT APIUserAbortError/);
+  assert.match(out, /CAUGHT Error/);
   assert.match(out, /PASS normal process exit/);
 });

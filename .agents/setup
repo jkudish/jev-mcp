@@ -23,11 +23,11 @@ for candidate in "$root/../repos/jev-browser" "$root/../jev-browser"; do
   fi
 done
 
-# Both packages require Node >= 20.
+# jev-mcp requires Node >= 22.
 node_version="$(node --version 2>/dev/null || true)"
 node_major="$(printf '%s' "$node_version" | sed 's/^v\([0-9]*\).*/\1/')"
-if [ "${node_major:-0}" -lt 20 ]; then
-  log "ERROR: Node >= 20 required, found: ${node_version:-none}"
+if [ "${node_major:-0}" -lt 22 ]; then
+  log "ERROR: Node >= 22 required, found: ${node_version:-none}"
   exit 1
 fi
 
