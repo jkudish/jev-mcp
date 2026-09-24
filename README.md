@@ -37,7 +37,7 @@ This is early software. Expect rough edges. Issues and pull requests are welcome
 
 ## Install
 
-Requires Node.js 22 or newer and a TypeSafe API key from [console.typesafe.ai/settings/keys](https://console.typesafe.ai/settings/keys).
+Requires Node.js 22 or newer and an API key for a Jev provider ([TypeSafe direct](https://console.typesafe.ai/settings/keys) is the default; alternatives are listed under [Configuration](#configuration)).
 
 ### Let an agent install it for you
 
@@ -616,6 +616,19 @@ Jev is TypeSafe's System One model: it returns typed answers with calibrated pro
 
 ## Configuration
 
+### Providers
+
+Built-in provider selection runs through the shared [@jkudish/jev-agent-tools](https://github.com/jkudish/jev-agent-tools) wire package: it picks a carrier from your environment, sends the judgment, and validates the answer before any tool sees it. Four carriers are built in, tried in this order:
+
+- **TypeSafe** (`TYPESAFE_API_KEY`): direct, and the default when set.
+- **OpenRouter** (`OPENROUTER_API_KEY`).
+- **Cloudflare Workers AI** (`CLOUDFLARE_API_TOKEN` or `JEV_CLOUDFLARE_API_TOKEN`, plus `CLOUDFLARE_ACCOUNT_ID`).
+- **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`).
+
+`JEV_PROVIDER` forces one, or `compatible` for any System One-compatible endpoint. Unknown names and missing credentials are configuration errors, never silent fallbacks. For resilience reasons the OpenRouter, Cloudflare, and compatible transports are implemented locally; see [Transport resilience](#transport-resilience).
+
+The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/jev-agent-tools#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
+
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `TYPESAFE_API_KEY` | none | TypeSafe direct. Default provider when set. |
@@ -659,8 +672,6 @@ export JEV_MCP_MODEL=openjev
 ```
 
 The server sends `POST` requests with `{ model, state, questions }` and requires the standard response shape: an `answers` object plus a `usage` object reporting `input_tokens` and `output_tokens`, with an optional `model` string echoing the model that answered. Envelope problems (a non-object body or `answers`, malformed `usage` counts, a non-string `model`) are rejected at the transport boundary. Individual answers are not judged here: each tool validates them under its own `invalid_response` contract, so a missing or malformed answer fails closed in the tool instead of aborting the call. `JEV_API_BASE_URL` must be the full endpoint URL including the `/v1/systemone` path; it is used verbatim, with no trailing-slash or path normalization. The endpoint and credentials are kept in the local process environment. This adapter is provider-neutral; OpenJEV is one example, not a hard-coded dependency.
-
-Need a carrier that is not built in? The [add-a-provider guide](https://github.com/jkudish/jev-agent-tools#adding-a-provider) in the shared wire package covers the options; this server's no-code path is the compatible endpoint above.
 
 ## Also in the family
 
