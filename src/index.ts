@@ -1112,7 +1112,9 @@ server.registerTool(
     const fields = [];
     for (let i = 0; i < rawFields.length; i++) {
       const f = rawFields[i];
-      const flags = ((f.flags ?? "").replace(/[^a-z]/g, "") + "g").replace(/g+/g, "g");
+      // Strip every g (and non-letters) before appending exactly one, so
+      // multi-letter flags like "gi" never become "gig" and throw.
+      const flags = (f.flags ?? "").replace(/[^a-z]/g, "").replace(/g/g, "") + "g";
       const result = await runRegex(doc, f.pattern, flags);
       fields.push({
         ...f,

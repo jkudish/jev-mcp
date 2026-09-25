@@ -1029,6 +1029,25 @@ test("jev_extract sends only eligible matches when overlong ones would fill the 
   });
 });
 
+test("jev_extract accepts multi-letter flags such as gi without corrupting them", async () => {
+  await withMock(() => ({ f0: pick("c0", ["c0", "c1", "none_of_them"]) }), async (client) => {
+    const result = await client.callTool({
+      name: "jev_extract",
+      arguments: {
+        document: "Ships V1.2.3 and v1.2.4",
+        fields: [{ id: "version", pattern: "V\\d+\\.\\d+\\.\\d+", flags: "gi", description: "The version tokens" }],
+      },
+    });
+    const field = payload(result).results[0];
+    // "gi" must survive normalization: both case-variant tokens match, the
+    // pick is accepted as auto, and nothing degrades to invalid_pattern
+    // (the old code turned "gi" into "gig" and threw in the regex worker).
+    assert.equal(field.status, "auto");
+    assert.equal(field.value, "V1.2.3");
+    assert.equal(field.candidates_considered, 2);
+  });
+});
+
 test("jev_extract turns a confident none_of_them from a truncated universe into review", async () => {
   await withMock(() => {
     const keys = Array.from({ length: 20 }, (_, i) => `c${i}`).concat("none_of_them");
