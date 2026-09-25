@@ -543,7 +543,7 @@ server.registerTool(
         ),
       purpose: z.string().optional().describe("What this classification is for; shared across all items."),
       context: z
-        .union([z.string(), z.record(z.any())])
+        .union([z.string(), z.record(z.string(), z.any())])
         .optional()
         .describe("Shared context available to every item's judgment: policies, catalogs, anything stable."),
       auto_accept: z.number().min(0).max(1).optional().describe("Minimum top probability for auto. Default 0.85."),
