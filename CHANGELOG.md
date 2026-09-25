@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0
+
+- Ships an agent skill inside the package: `skills/jev/` is included in the npm tarball, so coding agents get judgment-tool policy — which tool to call when, fail-closed handling, privacy — without hand-written prompts. Prompted by [#34](https://github.com/jkudish/jev-mcp/issues/34) by panaalexandrucristian.
+- `jev_extract` keeps multi-letter regex flags (`gi`) intact instead of mangling them into `gig` and throwing. Found in [#34](https://github.com/jkudish/jev-mcp/issues/34).
+- Internal: zod 4 and TypeScript 7; no tool behavior changes. `tools/list` input schemas gain a `propertyNames` field from zod 4's JSON Schema conversion. Via [#35](https://github.com/jkudish/jev-mcp/pull/35).
+- Dependency updates: `@jkudish/jev-agent-tools` 0.1.2 and `@modelcontextprotocol/sdk` 1.30.1.
+
 ## 0.8.0
 
 - New `jev_noul` tool: batched calibrated probability for stated propositions, labeled likely / unlikely / uncertain. Prompted by [#31](https://github.com/jkudish/jev-mcp/issues/31).

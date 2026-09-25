@@ -1,6 +1,6 @@
 {
   "name": "@jkudish/jev-mcp",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "MCP server exposing TypeSafe Jev as purpose-built judgment tools: verify claims, screen for injection, find, rerank, classify, decide, compare passages, extract fields, review patches, and gate completion claims, each with typed probabilities.",
   "type": "module",
   "license": "MIT",
