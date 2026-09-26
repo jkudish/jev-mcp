@@ -1,3 +1,4 @@
+import { request } from "node:http";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -66,6 +67,26 @@ test("--http serves 2025-era and 2026-07-28 clients statelessly behind a bearer 
     const modern = await listTools(url, { mode: { pin: "2026-07-28" } });
     assert.equal(modern.era, "modern");
     assert.deepEqual(modern.names, legacy.names);
+  } finally {
+    await stop();
+  }
+});
+
+test("--http on loopback without a token rejects a foreign Host or Origin (DNS rebinding)", async () => {
+  const { url, stop } = await startHttp({ HOST: "127.0.0.1", PORT: "0" });
+  // node:http, not fetch: fetch silently drops a caller-set Host header.
+  const post = (extra) =>
+    new Promise((resolve, reject) => {
+      const req = request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...extra },
+      }, (res) => { res.resume(); resolve(res.statusCode); });
+      req.on("error", reject);
+      req.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+    });
+  try {
+    assert.equal(await post({ host: "evil.example" }), 403);
+    assert.equal(await post({ origin: "https://evil.example" }), 403);
   } finally {
     await stop();
   }

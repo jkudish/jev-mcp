@@ -7,7 +7,7 @@ import { createServer as createNodeServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { createMcpHandler, type McpServer } from "@modelcontextprotocol/server";
-import { toNodeHandler } from "@modelcontextprotocol/node";
+import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from "@modelcontextprotocol/node";
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 
@@ -26,6 +26,10 @@ export async function serveHttp(factory: () => McpServer, env: NodeJS.ProcessEnv
     return given.length === token.length && timingSafeEqual(given, token);
   };
 
+  // On loopback, reject foreign Host/Origin headers so a web page cannot reach
+  // the server through DNS rebinding (the spec's Origin-validation MUST).
+  const guards = LOOPBACK.has(host) ? [localhostHostValidation(), localhostOriginValidation()] : [];
+
   const mcp = toNodeHandler(createMcpHandler(factory), {
     onerror: (error) => console.error(`[jev-mcp] http: ${error.message}`),
   });
@@ -36,6 +40,8 @@ export async function serveHttp(factory: () => McpServer, env: NodeJS.ProcessEnv
       res.writeHead(200, { "content-type": "text/plain" }).end("ok");
     } else if (path !== "/mcp") {
       res.writeHead(404).end();
+    } else if (!guards.every((guard) => guard(req, res))) {
+      return;
     } else if (!authorized(req.headers.authorization)) {
       res.writeHead(401, { "www-authenticate": "Bearer" }).end();
     } else {
