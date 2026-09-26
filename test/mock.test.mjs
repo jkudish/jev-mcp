@@ -996,6 +996,63 @@ test("jev_classify applies the 1e-9 argmax tolerance", async () => {
   });
 });
 
+test("jev_classify fallback item ids never collide with explicit ones", async () => {
+  // The first item omits its id (fallback item0); the second explicitly
+  // claims "item0". The fallback must yield, so both result ids stay unique.
+  await withMock(() => ({
+    i0: pick("c0", CLASSIFY_KEYS),
+    i1: pick("c1", CLASSIFY_KEYS),
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_classify", arguments: {
+      ...CLASSIFY_ARGS,
+      items: [{ text: "I was charged twice." }, { id: "item0", text: "Do you offer discounts?" }],
+    } }));
+    assert.deepEqual(body.results.map((r) => r.id), ["item0_2", "item0"]);
+    assert.deepEqual(body.results.map((r) => r.classification), ["billing", "sales"]);
+    assert.deepEqual(body.summary.by_class, { billing: 1, sales: 1 });
+  });
+});
+
+test("jev_classify fallback class ids never collide with explicit ones", async () => {
+  // The first class omits its id (fallback class0); the second explicitly
+  // claims "class0". Probabilities keys must stay unique and map to the
+  // right class.
+  await withMock(() => ({
+    i0: pick("c0", ["c0", "c1"]),
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_classify", arguments: {
+      items: [{ id: "message", text: "I was charged twice." }],
+      classes: [
+        { description: "Payments and refunds" },
+        { id: "class0", description: "Pricing and discounts" },
+      ],
+    } }));
+    assert.equal(body.results[0].classification, "class0_2");
+    assert.deepEqual(Object.keys(body.results[0].probabilities), ["class0_2", "class0"]);
+    assert.deepEqual(body.summary.by_class, { class0_2: 1 });
+  });
+});
+
+test("jev_classify tallies __proto__ and constructor class ids as plain keys", async () => {
+  // A null-prototype tally keeps prototype-named class ids countable instead
+  // of swallowing them (__proto__) or reading inherited values (constructor).
+  await withMock(() => ({
+    i0: pick("c0", ["c0", "c1", "c2"]),
+  }), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_classify", arguments: {
+      items: [{ id: "message", text: "I was charged twice." }],
+      classes: [
+        { id: "__proto__", description: "Payments and refunds" },
+        { id: "constructor", description: "Pricing and discounts" },
+        { id: "technical", description: "Technical support" },
+      ],
+    } }));
+    assert.equal(body.results[0].classification, "__proto__");
+    assert.ok(Object.hasOwn(body.summary.by_class, "__proto__"));
+    assert.equal(body.summary.by_class["__proto__"], 1);
+  });
+});
+
 const VERSIONS = Array.from({ length: 25 }, (_, i) => `1.0.${i}`).join(" ");
 const EXTRACT_ARGS = {
   document: `Changelog: ${VERSIONS}`,
