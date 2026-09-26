@@ -169,6 +169,15 @@ server.registerTool(
     const { items: evidence } = ensureUniqueIds(evidenceItems, "evidence");
     const { items: claimItems } = ensureUniqueIds(claims.map((text) => ({ text })), "claim");
 
+    // Keep the internal no-source option distinct from caller-provided evidence
+    // ids. A real evidence item named "none" must remain selectable and must be
+    // returned as supporting_evidence rather than being mistaken for the sentinel.
+    const evidenceIds = new Set(evidence.map((item) => item.id));
+    let noEvidenceKey = "none";
+    for (let suffix = 1; evidenceIds.has(noEvidenceKey); suffix++) {
+      noEvidenceKey = `none_${suffix}`;
+    }
+
     const questions: Record<string, unknown> = {};
     for (const claim of claimItems) {
       questions[`relation_${claim.id}`] = choice(
@@ -181,7 +190,7 @@ server.registerTool(
       );
       if (evidence.length > 1) {
         const criteria: Record<string, string | null> = Object.fromEntries(evidence.map((e) => [e.id, null]));
-        criteria["none"] = "No single evidence item contains the content the claim depends on";
+        criteria[noEvidenceKey] = "No single evidence item contains the content the claim depends on";
         questions[`source_${claim.id}`] = choice(
           `Which evidence item does claim \`${claim.id}\` (${claim.text}) rest on?`,
           criteria,
@@ -202,8 +211,9 @@ server.registerTool(
       const validated = validateChoiceAnswer(relation, Object.keys(RELATION_TO_VERDICT));
       // source_* is optional auxiliary information, requested only for multiple
       // evidence items. Its absence does not invalidate the relation verdict,
-      // but a present source must name a supplied evidence id (or "none").
-      const sourceKeys = [...evidence.map((e) => e.id), "none"];
+      // but a present source must name a supplied evidence id or the internal
+      // no-evidence option.
+      const sourceKeys = [...evidence.map((e) => e.id), noEvidenceKey];
       const source = validateChoiceAnswer(answers[`source_${claim.id}`], sourceKeys);
       const valid = validated && Object.hasOwn(RELATION_TO_VERDICT, validated.choice) &&
         (relation.confidence == null || validated.confidence !== null);
@@ -231,7 +241,7 @@ server.registerTool(
         probabilities: relation.probabilities ?? null,
         confidence,
         action: confidence === null ? "review" : verifyAction(confidence, autoAccept),
-        supporting_evidence: source && source.choice !== "none" ? source.choice : null,
+        supporting_evidence: source && source.choice !== noEvidenceKey ? source.choice : null,
       };
     });
 
