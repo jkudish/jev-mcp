@@ -557,22 +557,47 @@ server.registerTool(
     // Preserve caller IDs exactly; use opaque internal keys (i0/c0) for the
     // wire so sanitization can never rename or collide externally, and
     // reject duplicate supplied IDs rather than silently suffixing them.
-    const seenItemIds = new Set<string>();
-    const items = rawItems.map((it, i) => {
-      const external = it.id ?? `item${i}`;
+    // Generated fallbacks (item0/class0 style) avoid every supplied or
+    // already-used ID, so an omitted id can never collide with an explicit
+    // one — the same two-phase pattern jev_rerank uses for candidate IDs.
+    const suppliedItemIds = new Set<string>();
+    for (const it of rawItems) {
       if (it.id != null) {
-        if (seenItemIds.has(it.id)) throw new Error(`Duplicate item id: ${it.id}`);
-        seenItemIds.add(it.id);
+        if (suppliedItemIds.has(it.id)) throw new Error(`Duplicate item id: ${it.id}`);
+        suppliedItemIds.add(it.id);
       }
+    }
+    const usedItemIds = new Set(suppliedItemIds);
+    const items = rawItems.map((it, i) => {
+      let external: string;
+      if (it.id != null) {
+        external = it.id;
+      } else {
+        external = `item${i}`;
+        let suffix = 2;
+        while (usedItemIds.has(external)) external = `item${i}_${suffix++}`;
+      }
+      usedItemIds.add(external);
       return { external, key: `i${i}`, text: truncate(it.text, MAX_ITEM_CHARS) };
     });
-    const seenClassIds = new Set<string>();
-    const classes = rawClasses.map((c, i) => {
-      const external = c.id ?? `class${i}`;
+    const suppliedClassIds = new Set<string>();
+    for (const c of rawClasses) {
       if (c.id != null) {
-        if (seenClassIds.has(c.id)) throw new Error(`Duplicate class id: ${c.id}`);
-        seenClassIds.add(c.id);
+        if (suppliedClassIds.has(c.id)) throw new Error(`Duplicate class id: ${c.id}`);
+        suppliedClassIds.add(c.id);
       }
+    }
+    const usedClassIds = new Set(suppliedClassIds);
+    const classes = rawClasses.map((c, i) => {
+      let external: string;
+      if (c.id != null) {
+        external = c.id;
+      } else {
+        external = `class${i}`;
+        let suffix = 2;
+        while (usedClassIds.has(external)) external = `class${i}_${suffix++}`;
+      }
+      usedClassIds.add(external);
       return { external, key: `c${i}`, description: truncate(c.description, MAX_ITEM_CHARS) };
     });
     if (items.length * classes.length > 8_000) {
@@ -634,7 +659,10 @@ server.registerTool(
       };
     });
 
-    const byClass: Record<string, number> = {};
+    // Null prototype: a caller-supplied class id such as "__proto__" or
+    // "constructor" must be tallied as its own key, not swallowed by (or
+    // read from) Object.prototype.
+    const byClass: Record<string, number> = Object.create(null);
     for (const r of results) {
       if (r.classification !== null) byClass[r.classification] = (byClass[r.classification] ?? 0) + 1;
     }
