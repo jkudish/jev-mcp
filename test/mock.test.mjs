@@ -1659,6 +1659,36 @@ test("jev_verify keeps a real evidence id named none distinct from its no-source
   });
 });
 
+test("jev_verify skips occupied none_N keys and maps the no-source option to null", async () => {
+  await withMock((request) => {
+    const criteria = request.questions.source_claim0.criteria;
+    assert.equal(criteria.none, null);
+    assert.equal(criteria.none_1, null);
+    const noSourceKey = Object.entries(criteria).find(([, description]) =>
+      description === "No single evidence item contains the content the claim depends on"
+    )?.[0];
+    assert.equal(noSourceKey, "none_2");
+    return {
+      relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)),
+      source_claim0: pick("none_2", Object.keys(criteria)),
+    };
+  }, async (client) => {
+    const result = await client.callTool({
+      name: "jev_verify",
+      arguments: {
+        claims: ["The release is ready."],
+        evidence: [
+          { id: "none", text: "The release checks passed." },
+          { id: "none_1", text: "More release checks." },
+          { id: "notes", text: "Unrelated planning notes." },
+        ],
+      },
+    });
+    const body = payload(result);
+    assert.equal(body.results[0].supporting_evidence, null);
+  });
+});
+
 test("TypeSafe package rejection invalidates only the malformed judgment without another paid request", async () => {
   await withMock(() => ({
     relation_claim0: pick("supports", ["supports", "contradicts", "says_nothing"]),
