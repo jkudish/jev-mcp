@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.10.0
 
-- Opt-in stateless Streamable HTTP: `jev-mcp --http` (or `JEV_MCP_TRANSPORT=http`) serves MCP 2026-07-28 per request and 2025-era clients through the SDK's stateless fallback, with no sessions, on `PORT` (default 8080) at `/mcp`, with `/health`. `JEV_MCP_AUTH_TOKEN` gates it with a bearer token and is required unless `HOST` is loopback. Stdio stays the default.
+- Opt-in stateless Streamable HTTP: `jev-mcp --http` (or `JEV_MCP_TRANSPORT=http`) serves MCP 2026-07-28 per request and 2025-era clients through the SDK's stateless fallback, with no sessions, on `PORT` (default 8080) at `/mcp`, with `/health`. `HOST` defaults to loopback; binding beyond it is explicit. `JEV_MCP_AUTH_TOKEN` gates it with a bearer token and is required unless `HOST` is loopback; Host/Origin rebinding guards answer fixed-string 403s. Concurrent requests are capped at `JEV_MCP_MAX_CONCURRENCY` (default 16) with `429` backpressure, and a cancelled request aborts its in-flight regex worker and Jev calls. Stdio stays the default. Via [#37](https://github.com/jkudish/jev-mcp/pull/37) by shivasymbl.
 - Stdio now also answers 2026-07-28 clients; 2025-era clients see no change.
+- Client-visible provider errors are fixed strings (provider name and status only); upstream response text, including reflected credentials, never reaches tool error content.
+- `jev_classify` keeps label ids collision-free and tallies on a null prototype, so labels like `constructor` or `__proto__` can no longer shadow `Object.prototype` or collide with generated ids. Via [#36](https://github.com/jkudish/jev-mcp/pull/36) by kittimzhe.
+- `jev_verify` no longer mistakes an evidence item literally named `none` for its internal no-source option; the internal key now skips occupied `none_N` ids. Via [#38](https://github.com/jkudish/jev-mcp/pull/38) by xujiantop-crypto.
 - Internal: `@modelcontextprotocol/sdk` 1.x replaced by the v2 packages `@modelcontextprotocol/server` and `@modelcontextprotocol/node` 2.1.0; tools are registered once and replayed onto a fresh server per connection or request.
 
 ## 0.9.0

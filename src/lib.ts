@@ -1,6 +1,8 @@
 // Pure helpers — no API access, fully unit-testable.
 
 /** Max candidates in one jev_find call. TypeSafe Choice supports up to 255 options. */
+import { Worker } from "node:worker_threads";
+
 export const MAX_CANDIDATES = 250;
 
 /** Default per-candidate text cap (characters) to keep request size bounded. */
@@ -403,4 +405,78 @@ export function normalizeEvidence(raw: ReviewEvidenceInput): Array<{ id: string;
 /** True when at least one evidence item carries non-whitespace text. */
 export function hasNonEmptyEvidence(items: Array<{ id: string; text: string }>): boolean {
   return items.some((item) => item.text.trim().length > 0);
+}
+
+const REGEX_WORKER_SOURCE = `
+import { parentPort, workerData } from "node:worker_threads";
+const { document, pattern, flags, maxCandidates, maxCandidateChars } = workerData;
+try {
+  const re = new RegExp(pattern, flags);
+  const seen = new Set();
+  const candidates = [];
+  let truncated = false;
+  let tooLong = 0;
+  for (const match of document.matchAll(re)) {
+    const value = match[0];
+    if (value.length === 0 || seen.has(value)) continue;
+    seen.add(value);
+    if (value.length > maxCandidateChars) { tooLong += 1; continue; }
+    if (candidates.length >= maxCandidates) { truncated = true; break; }
+    candidates.push(value);
+  }
+  parentPort.postMessage({ candidates, truncated, tooLong });
+} catch (error) {
+  parentPort.postMessage({ candidates: [], truncated: false, tooLong: 0, error: String(error && error.message ? error.message : error) });
+}
+`;
+
+/** Regex result shape: candidate substrings plus how the universe was capped. */
+export interface RegexResult {
+  candidates: string[];
+  truncated: boolean;
+  tooLong: number;
+  error: string | null;
+}
+
+/**
+ * Run a regex in an isolated worker so hostile patterns cannot hang the server.
+ * An abort signal (the MCP request's cancellation) terminates the worker and
+ * settles immediately instead of burning CPU on a request nobody awaits.
+ */
+export function runRegex(
+  document: string,
+  pattern: string,
+  flags: string,
+  signal?: AbortSignal,
+): Promise<RegexResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const worker = new Worker(REGEX_WORKER_SOURCE, {
+      eval: true,
+      workerData: { document, pattern, flags, maxCandidates: MAX_EXTRACT_CANDIDATES, maxCandidateChars: MAX_EXTRACT_CANDIDATE_CHARS },
+    });
+    const finish = (value: RegexResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      void worker.terminate();
+      resolve(value);
+    };
+    const timer = setTimeout(
+      () =>
+        finish({
+          candidates: [],
+          truncated: false,
+          tooLong: 0,
+          error: `regex timed out after ${REGEX_TIMEOUT_MS}ms; simplify the pattern`,
+        }),
+      REGEX_TIMEOUT_MS,
+    );
+    const onAbort = () => finish({ candidates: [], truncated: false, tooLong: 0, error: "request aborted" });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    worker.on("message", (message) => finish({ error: null, ...message }));
+    worker.on("error", (error) => finish({ candidates: [], truncated: false, tooLong: 0, error: error.message }));
+  });
 }

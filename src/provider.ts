@@ -311,11 +311,18 @@ export async function askJev(
       }, deadline);
       const bodyText = await readBodyBounded(response, deadline);
       if (!response.ok) {
-        // Redact the key before the body becomes MCP-visible error text.
-        const body = redactSecret(bodyText, process.env.OPENROUTER_API_KEY ?? "").slice(0, 200);
-        throw new Error(`OpenRouter decisions API ${response.status}: ${body}`);
+        // Client-visible errors stay fixed-string: provider name and numeric
+        // status only, never interpolated upstream response text.
+        throw new Error(`OpenRouter decisions API ${response.status}`);
       }
-      const body = JSON.parse(bodyText);
+      let body: any;
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        // Node's parse errors quote the malformed input; a reflecting endpoint
+        // must not leak even a snippet through a 200 body.
+        throw new Error(`OpenRouter decisions API ${response.status} returned an unparseable response`);
+      }
       return {
         answers: body.answers ?? {},
         // The decisions endpoint does not document a usage block; tolerate absence.
@@ -341,11 +348,9 @@ export async function askJev(
       }, deadline);
       const bodyText = await readBodyBounded(response, deadline);
       if (!response.ok) {
-        const apiKey = process.env.JEV_API_KEY ?? "";
-        // Redact the key before the body becomes MCP-visible error text; a
-        // proxy that reflects the request would otherwise echo it back.
-        const body = redactSecret(bodyText, apiKey).slice(0, 200);
-        throw new Error(`Jev-compatible endpoint ${response.status}: ${body}`);
+        // Client-visible errors stay fixed-string: provider name and numeric
+        // status only — a reflecting proxy can echo nothing back through them.
+        throw new Error(`Jev-compatible endpoint ${response.status}`);
       }
       let body: unknown;
       try {
@@ -412,18 +417,18 @@ export async function askJev(
   } finally {
     cfDeadline.dispose();
   }
-  // One redacted formatter for every Cloudflare error path (HTTP status,
-  // success:false, non-Completed state): a reflecting endpoint must never echo
-  // the token into MCP-visible error text, on any of the three.
-  const cfError = (detail: string) =>
-    new Error(`Cloudflare AI run ${cfStatus}: ${redactSecret(detail, cfToken).slice(0, 200)}`);
+  // Fixed-string formatter for every Cloudflare error path (HTTP status,
+  // success:false, non-Completed state): upstream body and state text never
+  // reach MCP-visible error messages, so a reflecting endpoint can echo
+  // nothing — not even unredacted — back through them.
+  const cfError = () => new Error(`Cloudflare AI run ${cfStatus}${cfStatus < 400 ? " did not complete" : ""}`);
   if (cfStatus >= 400 || cfBody.success === false) {
-    throw cfError(JSON.stringify(cfBody.errors ?? cfBody));
+    throw cfError();
   }
   // The v4 envelope double-nests: body.result.result holds the model output.
   const cfOuter = cfBody.result;
   if (cfOuter && typeof cfOuter.state === "string" && cfOuter.state !== "Completed") {
-    throw cfError(`state ${cfOuter.state}: ${JSON.stringify(cfBody.errors ?? [])}`);
+    throw cfError();
   }
   const cfPayload = cfOuter?.result ?? cfOuter ?? cfBody;
   return {

@@ -67,6 +67,7 @@ import {
   MAX_RERANK_TOTAL_CHARS,
   REGEX_TIMEOUT_MS,
   rerankByScore,
+  runRegex,
   RELATION_TO_VERDICT,
   screenRecommendation,
   truncate,
@@ -1060,62 +1061,6 @@ import { Worker } from "node:worker_threads";
 
 // Caller-supplied regex runs in a throwaway worker with a hard deadline, so a
 // catastrophic backtracking pattern can never hang the MCP server itself.
-const REGEX_WORKER_SOURCE = `
-import { parentPort, workerData } from "node:worker_threads";
-const { document, pattern, flags, maxCandidates, maxCandidateChars } = workerData;
-try {
-  const re = new RegExp(pattern, flags);
-  const seen = new Set();
-  const candidates = [];
-  let truncated = false;
-  let tooLong = 0;
-  for (const match of document.matchAll(re)) {
-    const value = match[0];
-    if (value.length === 0 || seen.has(value)) continue;
-    seen.add(value);
-    if (value.length > maxCandidateChars) { tooLong += 1; continue; }
-    if (candidates.length >= maxCandidates) { truncated = true; break; }
-    candidates.push(value);
-  }
-  parentPort.postMessage({ candidates, truncated, tooLong });
-} catch (error) {
-  parentPort.postMessage({ candidates: [], truncated: false, tooLong: 0, error: String(error && error.message ? error.message : error) });
-}
-`;
-
-function runRegex(
-  document: string,
-  pattern: string,
-  flags: string,
-): Promise<{ candidates: string[]; truncated: boolean; tooLong: number; error: string | null }> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const worker = new Worker(REGEX_WORKER_SOURCE, {
-      eval: true,
-      workerData: { document, pattern, flags, maxCandidates: MAX_EXTRACT_CANDIDATES, maxCandidateChars: MAX_EXTRACT_CANDIDATE_CHARS },
-    });
-    const finish = (value: { candidates: string[]; truncated: boolean; tooLong: number; error: string | null }) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      void worker.terminate();
-      resolve(value);
-    };
-    const timer = setTimeout(
-      () =>
-        finish({
-          candidates: [],
-          truncated: false,
-          tooLong: 0,
-          error: `regex timed out after ${REGEX_TIMEOUT_MS}ms; simplify the pattern`,
-        }),
-      REGEX_TIMEOUT_MS,
-    );
-    worker.on("message", (message) => finish(message));
-    worker.on("error", (error) => finish({ candidates: [], truncated: false, tooLong: 0, error: error.message }));
-  });
-}
-
 tools.registerTool(
   "jev_extract",
   {
@@ -1163,11 +1108,13 @@ tools.registerTool(
     // value returned.
     const fields = [];
     for (let i = 0; i < rawFields.length; i++) {
+      // A cancelled request's regex work serves nobody; stop scheduling it.
+      if (ctx.mcpReq.signal.aborted) break;
       const f = rawFields[i];
       // Strip every g (and non-letters) before appending exactly one, so
       // multi-letter flags like "gi" never become "gig" and throw.
       const flags = (f.flags ?? "").replace(/[^a-z]/g, "").replace(/g/g, "") + "g";
-      const result = await runRegex(doc, f.pattern, flags);
+      const result = await runRegex(doc, f.pattern, flags, ctx.mcpReq.signal);
       fields.push({
         ...f,
         key: `f${i}`,

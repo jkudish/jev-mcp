@@ -19,6 +19,7 @@ import {
   MAX_ITEMS,
   MAX_REQUIREMENTS,
   rankCandidates,
+  runRegex,
   RELATION_TO_VERDICT,
   requireCompleteContext,
   resolvePolicyThresholds,
@@ -295,4 +296,32 @@ test("review/gate caps keep real diffs reviewable", () => {
   assert.ok(MAX_REVIEW_DOC_CHARS >= 50_000, "per-document cap must fit real diffs");
   assert.ok(MAX_CLAIM_CHARS >= 500 && MAX_CLAIM_CHARS <= 4_000);
   assert.ok(MAX_GATE_CLAIMS >= 5 && MAX_GATE_CLAIMS <= 40);
+});
+
+test("runRegex collects unique candidates and reports nothing echoed", async () => {
+  const result = await runRegex("alpha beta alpha gamma", "[a-z]+", "g");
+  assert.deepEqual(result.candidates, ["alpha", "beta", "gamma"]);
+  assert.equal(result.truncated, false);
+  assert.equal(result.tooLong, 0);
+  assert.equal(result.error, null);
+});
+
+test("runRegex settles immediately with an error when the request is already aborted", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const started = Date.now();
+  const result = await runRegex("a".repeat(10_000), "^(a+)+$", "g", controller.signal);
+  assert.ok(Date.now() - started < 500, "aborted runRegex must not burn CPU to the timeout");
+  assert.equal(result.error, "request aborted");
+  assert.deepEqual(result.candidates, []);
+});
+
+test("runRegex terminates its worker when the signal aborts mid-run", async () => {
+  const controller = new AbortController();
+  const promise = runRegex("a".repeat(10_000) + "!", "^(a+)+$", "g", controller.signal);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  controller.abort();
+  const result = await promise;
+  assert.equal(result.error, "request aborted");
+  assert.deepEqual(result.candidates, []);
 });

@@ -184,9 +184,9 @@ test("compatible provider rejects a malformed response", async () => {
   );
 });
 
-test("compatible provider reports non-2xx status with the body redacted", async () => {
-  // The 401 body echoes the Authorization header; the key must not survive
-  // into the MCP-visible error, while the status and harmless text remain.
+test("compatible provider reports non-2xx status without upstream body text", async () => {
+  // The 401 body echoes the Authorization header; nothing from the upstream
+  // body may reach the MCP-visible error — fixed provider name and status only.
   await withMock(
     {},
     async (client) => {
@@ -195,8 +195,8 @@ test("compatible provider reports non-2xx status with the body redacted", async 
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /401/);
-      assert.match(result.content[0].text, /Unauthorized client/);
+      assert.match(result.content[0].text, /Jev-compatible endpoint 401/);
+      assert.ok(!result.content[0].text.includes("Unauthorized client"));
       assert.ok(!result.content[0].text.includes("compatible-test-key"));
     },
     compatibleEnv,
@@ -460,6 +460,30 @@ test("the retry allowlist is 408, 409, 429, and 500 through 599", async () => {
   );
 });
 
+test("openrouter provider keeps a malformed 200 body out of client-visible errors", async () => {
+  // Node's parse errors quote the malformed input; a 200 body reflecting the
+  // key must not leak even a snippet. The error is fixed-string status only.
+  await withMock(
+    {},
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /OpenRouter decisions API 200 returned an unparseable response/);
+      assert.ok(!result.content[0].text.includes("sk-or-v1-echo-secret"));
+      assert.ok(!result.content[0].text.includes("garbage"));
+    },
+    (port) => ({
+      JEV_PROVIDER: "openrouter",
+      OPENROUTER_API_KEY: "sk-or-v1-echo-secret",
+      JEV_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}/`,
+    }),
+    { status: 200, raw: "garbage sk-or-v1-echo-secret {{{not json" },
+  );
+});
+
 test("openrouter provider redacts a reflected key from error bodies", async () => {
   await withMock(
     {},
@@ -471,6 +495,7 @@ test("openrouter provider redacts a reflected key from error bodies", async () =
       assert.equal(result.isError, true);
       assert.match(result.content[0].text, /OpenRouter decisions API 401/);
       assert.ok(!result.content[0].text.includes("sk-or-v1-echo-secret"));
+      assert.ok(!result.content[0].text.includes("invalid key"));
       assert.equal(requests[0].path, "/alpha/decisions");
       assert.equal(requests[0].headers.authorization, "Bearer sk-or-v1-echo-secret");
     },
@@ -504,6 +529,7 @@ test("cloudflare provider redacts the token on every error path", async () => {
       assert.equal(result.isError, true);
       assert.match(result.content[0].text, /Cloudflare AI run 200/);
       assert.ok(!result.content[0].text.includes("cf-echo-token"));
+      assert.ok(!result.content[0].text.includes("bad token"));
       assert.match(requests[0].path, /\/accounts\/test-account\/ai\/run$/);
     },
     cfEnv,
@@ -518,8 +544,9 @@ test("cloudflare provider redacts the token on every error path", async () => {
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /state failed/);
+      assert.match(result.content[0].text, /Cloudflare AI run 200 did not complete/);
       assert.ok(!result.content[0].text.includes("cf-echo-token"));
+      assert.ok(!result.content[0].text.includes("failed"));
     },
     cfEnv,
     { raw: JSON.stringify({ success: true, errors: ["token cf-echo-token echoed"], result: { state: "failed", result: {} } }) },

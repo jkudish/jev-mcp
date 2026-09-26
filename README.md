@@ -136,11 +136,13 @@ Stdio is the default. To host one shared server for a team or a remote agent, ru
 JEV_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" TYPESAFE_API_KEY=ts_... npx -y @jkudish/jev-mcp --http
 ```
 
-It listens on `PORT` (default `8080`) and `HOST` (default `0.0.0.0`), serves MCP at `/mcp` and a health check at `/health`. It speaks MCP 2026-07-28 and falls back to stateless serving for 2025-era clients, so it keeps no sessions and scales behind any load balancer. Every call spends your Jev key, so `JEV_MCP_AUTH_TOKEN` is required unless `HOST` is loopback. Clients send it as a bearer token:
+It listens on `PORT` (default `8080`) and `HOST` (default `127.0.0.1` — set `HOST=0.0.0.0` explicitly to serve beyond your machine), serves MCP at `/mcp` and a health check at `/health`. It speaks MCP 2026-07-28 and falls back to stateless serving for 2025-era clients, so it keeps no sessions and scales behind any load balancer. Every call spends your Jev key, so `JEV_MCP_AUTH_TOKEN` is required unless `HOST` is loopback. Clients send it as a bearer token:
 
 ```bash
 claude mcp add --transport http jev https://jev.example.com/mcp --header "Authorization: Bearer $JEV_MCP_AUTH_TOKEN"
 ```
+
+The server itself speaks plain HTTP: terminate TLS at a reverse proxy or load balancer before exposing it beyond loopback, and put connection limits and request rate limits at that ingress — the process bounds admitted `/mcp` requests (`JEV_MCP_MAX_CONCURRENCY`, default 16; excess shed with `429`) and caps request bodies at 4 MiB, but it does not limit sockets waiting to finish headers or repeatedly rejected requests.
 
 ### Agent skill
 
