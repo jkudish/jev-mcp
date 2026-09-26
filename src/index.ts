@@ -16,8 +16,8 @@
 //   jev_review   — score a proposed diff before the task is called done
 //   jev_gate     — review a patch and verify completion claims in one call
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { choice, noul, score } from "@typesafe-ai/sdk";
 import { z } from "zod";
 import { createRequire } from "node:module";
@@ -80,7 +80,21 @@ const MODEL = process.env.JEV_MCP_MODEL ?? "jev-latest";
 // Resolved at runtime so the MCP handshake version always matches the package.
 const { version: packageVersion } = createRequire(import.meta.url)("../package.json") as { version: string };
 
-const server = new McpServer({ name: "jev-mcp", version: packageVersion });
+// Tools are declared once at module scope and replayed onto a fresh McpServer
+// per stdio connection or per stateless HTTP request (see createServer below).
+type RegisterTool = McpServer["registerTool"];
+const toolRegistrations: Parameters<RegisterTool>[] = [];
+const tools = {
+  registerTool: ((...args: Parameters<RegisterTool>) => {
+    toolRegistrations.push(args);
+  }) as unknown as RegisterTool,
+};
+
+export function createServer(): McpServer {
+  const server = new McpServer({ name: "jev-mcp", version: packageVersion });
+  for (const args of toolRegistrations) (server.registerTool as (...a: Parameters<RegisterTool>) => unknown)(...args);
+  return server;
+}
 
 import { askJev as askProvider } from "./provider.js";
 
@@ -137,7 +151,7 @@ const candidatesSchema = z
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_verify
 // ─────────────────────────────────────────────────────────────────────────────
-server.registerTool(
+tools.registerTool(
   "jev_verify",
   {
     title: "Verify claims against evidence",
@@ -158,7 +172,7 @@ server.registerTool(
         .describe("Verdicts at or above this confidence stand automatically; below it they are flagged 'review'. Default 0.8."),
     }),
   },
-  async ({ claims, evidence: rawEvidence, auto_accept }, extra) => {
+  async ({ claims, evidence: rawEvidence, auto_accept }, ctx) => {
     const autoAccept = auto_accept ?? 0.8;
     const evidenceItems =
       typeof rawEvidence === "string"
@@ -204,7 +218,7 @@ server.registerTool(
       evidence,
     };
 
-    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
 
     const results = claimItems.map((claim) => {
       const relation = answers[`relation_${claim.id}`];
@@ -265,7 +279,7 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_screen
 // ─────────────────────────────────────────────────────────────────────────────
-server.registerTool(
+tools.registerTool(
   "jev_screen",
   {
     title: "Screen content before it enters agent context",
@@ -284,7 +298,7 @@ server.registerTool(
       review_at: z.number().min(0).max(1).optional().describe("Injection probability at or above which content is flagged for review. Default 0.25."),
     }),
   },
-  async ({ text: content, purpose, block_at, review_at }, extra) => {
+  async ({ text: content, purpose, block_at, review_at }, ctx) => {
     const blockAt = block_at ?? 0.75;
     const reviewAt = review_at ?? 0.25;
 
@@ -309,7 +323,7 @@ server.registerTool(
     }
 
     const state = { content, purpose: purpose ?? null };
-    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
 
     const injection = validateNoulAnswer(answers.injection);
     const substance = validateNoulAnswer(answers.substance);
@@ -346,7 +360,7 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_noul
 // ─────────────────────────────────────────────────────────────────────────────
-server.registerTool(
+tools.registerTool(
   "jev_noul",
   {
     title: "Calibrated probability for propositions",
@@ -379,7 +393,7 @@ server.registerTool(
         ),
     }),
   },
-  async ({ propositions, context: rawContext, auto_accept }, extra) => {
+  async ({ propositions, context: rawContext, auto_accept }, ctx) => {
     const autoAccept = auto_accept ?? 0.85;
 
     const contextItems =
@@ -411,7 +425,7 @@ server.registerTool(
     }
 
     const state = { propositions: items, context: contextItems.length ? contextItems : null };
-    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
 
     const rows = items.map((p) => ({
       id: p.id,
@@ -454,7 +468,7 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_find
 // ─────────────────────────────────────────────────────────────────────────────
-server.registerTool(
+tools.registerTool(
   "jev_find",
   {
     title: "Semantic search over candidates",
@@ -470,7 +484,7 @@ server.registerTool(
       top_k: z.number().int().min(1).max(50).optional().describe("How many ranked candidates to return. Default 5."),
     }),
   },
-  async ({ query, candidates: rawCandidates, top_k }, extra) => {
+  async ({ query, candidates: rawCandidates, top_k }, ctx) => {
     const topK = top_k ?? 5;
     const { items: candidates } = ensureUniqueIds(
       rawCandidates.map((c) => ({ id: c.id ?? "", text: truncate(c.text, MAX_CANDIDATE_CHARS) })),
@@ -487,7 +501,7 @@ server.registerTool(
     };
 
     const state = { query, candidates };
-    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
 
     const exists = validateNoulAnswer(answers.exists);
     const best = validateChoiceAnswer(answers.best, candidates.map((c) => c.id));
@@ -526,7 +540,7 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_classify
 // ─────────────────────────────────────────────────────────────────────────────
-server.registerTool(
+tools.registerTool(
   "jev_classify",
   {
     title: "Classify items against a shared label set",
@@ -560,7 +574,7 @@ server.registerTool(
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
     }),
   },
-  async ({ items: rawItems, classes: rawClasses, purpose, context, auto_accept, minimum_margin }, extra) => {
+  async ({ items: rawItems, classes: rawClasses, purpose, context, auto_accept, minimum_margin }, ctx) => {
     const autoAccept = auto_accept ?? 0.85;
     const minMargin = minimum_margin ?? 0.5;
 
@@ -634,7 +648,7 @@ server.registerTool(
       );
     }
 
-    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
 
     const keyToExternal = new Map(classes.map((c) => [c.key, c.external]));
     const results = items.map((item) => {
@@ -699,7 +713,7 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_decide
 // ─────────────────────────────────────────────────────────────────────────────
-server.registerTool(
+tools.registerTool(
   "jev_decide",
   {
     title: "Decide between bounded alternatives",
@@ -732,7 +746,7 @@ server.registerTool(
         .describe("Include ask_user / investigate / none as Choosable options so the model can decline to rank. Default true."),
     }),
   },
-  async ({ decision, evidence, priorities, candidates, requirements: reqs, escape_hatches }, extra) => {
+  async ({ decision, evidence, priorities, candidates, requirements: reqs, escape_hatches }, ctx) => {
     const includeHatches = escape_hatches ?? true;
     const requirements = reqs ?? [];
 
@@ -784,7 +798,7 @@ server.registerTool(
       candidates: candidateKeys.map((c) => ({ id: c.key, description: c.description })),
       requirements,
     };
-    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
 
     const keyToId = new Map(candidateKeys.map((c) => [c.key, c.id]));
     const expectedRecKeys = new Set([...candidateKeys.map((c) => c.key), ...(includeHatches ? Object.keys(DECIDE_ESCAPE_HATCHES) : [])]);
@@ -838,7 +852,7 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_rerank
 // ─────────────────────────────────────────────────────────────────────────────
-server.registerTool(
+tools.registerTool(
   "jev_rerank",
   {
     title: "Score every candidate's relevance and return them sorted",
@@ -854,7 +868,7 @@ server.registerTool(
       top_k: z.number().int().min(1).max(250).optional().describe("How many ranked candidates to return. Default: all."),
     }),
   },
-  async ({ query, candidates: rawCandidates, top_k }, extra) => {
+  async ({ query, candidates: rawCandidates, top_k }, ctx) => {
     const topK = top_k ?? null;
 
     // Caller IDs are preserved verbatim; opaque wire keys (classify pattern).
@@ -899,7 +913,7 @@ server.registerTool(
       });
     });
 
-    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
 
     // One invalid Noul makes the whole ordering untrustworthy; never sort a
     // missing answer as a confident zero.
@@ -948,7 +962,7 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // jev_compare
 // ─────────────────────────────────────────────────────────────────────────────
-server.registerTool(
+tools.registerTool(
   "jev_compare",
   {
     title: "Compare two passages for factual agreement",
@@ -971,7 +985,7 @@ server.registerTool(
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
     }),
   },
-  async ({ passage_a, passage_b, aspects: rawAspects, purpose, auto_accept, minimum_margin }, extra) => {
+  async ({ passage_a, passage_b, aspects: rawAspects, purpose, auto_accept, minimum_margin }, ctx) => {
     const autoAccept = auto_accept ?? 0.85;
     const minMargin = minimum_margin ?? 0.5;
     const aspects = rawAspects ?? [];
@@ -996,7 +1010,7 @@ server.registerTool(
     });
 
     const state = { purpose: purpose ?? null, passage_a: a, passage_b: b, aspects };
-    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
 
     const expected = new Set(Object.keys(COMPARE_RELATIONS));
 
@@ -1102,7 +1116,7 @@ function runRegex(
   });
 }
 
-server.registerTool(
+tools.registerTool(
   "jev_extract",
   {
     title: "Extract fields by regex, Jev picks the right match",
@@ -1131,7 +1145,7 @@ server.registerTool(
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
     }),
   },
-  async ({ document, fields: rawFields, purpose, auto_accept, minimum_margin }, extra) => {
+  async ({ document, fields: rawFields, purpose, auto_accept, minimum_margin }, ctx) => {
     const autoAccept = auto_accept ?? 0.85;
     const minMargin = minimum_margin ?? 0.5;
     const doc = truncate(document, 50000);
@@ -1191,7 +1205,7 @@ server.registerTool(
     }
 
     const { answers, usage, provider, model } =
-      stateFields.length > 0 ? await askJev({ purpose: purpose ?? null, document: doc, fields: stateFields }, questions, extra.signal) : { answers: {} as Record<string, any>, usage: null, provider: "none" as const, model: MODEL };
+      stateFields.length > 0 ? await askJev({ purpose: purpose ?? null, document: doc, fields: stateFields }, questions, ctx.mcpReq.signal) : { answers: {} as Record<string, any>, usage: null, provider: "none" as const, model: MODEL };
 
     const results = fields.map((f) => {
       const flags = { candidates_truncated: f.truncated, matches_skipped_too_long: f.tooLong };
@@ -1499,7 +1513,7 @@ function projectReviewHalf(
   return { ...base, action, composite, reason_codes: reasonCodes, limiting_rubrics: limitingRubrics };
 }
 
-server.registerTool(
+tools.registerTool(
   "jev_review",
   {
     title: "Review a proposed patch",
@@ -1537,7 +1551,7 @@ server.registerTool(
         .describe("Weighted composite at or above this is required for auto. Default 0.7."),
     }),
   },
-  async ({ request, diff, tests, auto_accept, review_at, composite_floor }, extra) => {
+  async ({ request, diff, tests, auto_accept, review_at, composite_floor }, ctx) => {
     const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept ?? 0.8, review_at);
     const compositeFloor = composite_floor ?? DEFAULT_COMPOSITE_FLOOR;
     const truncated =
@@ -1551,7 +1565,7 @@ server.registerTool(
       diff: truncate(diff, MAX_REVIEW_DOC_CHARS),
       tests: tests ? truncate(tests, MAX_REVIEW_DOC_CHARS) : null,
     };
-    const { answers, usage, provider, model } = await askJev(state, reviewQuestions(), extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, reviewQuestions(), ctx.mcpReq.signal);
 
     return text({
       tool: "jev_review",
@@ -1564,7 +1578,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+tools.registerTool(
   "jev_gate",
   {
     title: "Gate completion: review a patch and verify claims",
@@ -1611,7 +1625,7 @@ server.registerTool(
         .describe("Weighted composite at or above this is required for auto. Default 0.7."),
     }),
   },
-  async ({ request, diff, claims, evidence: rawEvidence, tests, auto_accept, review_at, composite_floor }, extra) => {
+  async ({ request, diff, claims, evidence: rawEvidence, tests, auto_accept, review_at, composite_floor }, ctx) => {
     const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept ?? 0.8, review_at);
     const compositeFloor = composite_floor ?? DEFAULT_COMPOSITE_FLOOR;
     const evidence = normalizeEvidence(rawEvidence as never);
@@ -1666,7 +1680,7 @@ server.registerTool(
       );
     });
 
-    const { answers, usage, provider, model } = await askJev(state, questions, extra.signal);
+    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
 
     const review = projectReviewHalf(answers, { autoAccept, reviewAt, compositeFloor }, truncated);
 
@@ -1741,5 +1755,11 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────────────────────────
 // Boot
 // ─────────────────────────────────────────────────────────────────────────────
-await server.connect(new StdioServerTransport());
-console.error(`[jev-mcp] ready — model ${MODEL}`);
+if (process.argv.includes("--http") || process.env.JEV_MCP_TRANSPORT === "http") {
+  const { serveHttp } = await import("./http.js");
+  const { url } = await serveHttp(createServer);
+  console.error(`[jev-mcp] ready — model ${MODEL}, stateless HTTP at ${url}`);
+} else {
+  serveStdio(createServer);
+  console.error(`[jev-mcp] ready — model ${MODEL}`);
+}

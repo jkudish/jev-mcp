@@ -5,8 +5,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const serverPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 
@@ -325,7 +325,6 @@ test("caller cancellation aborts the in-flight request without retrying and the 
       const pending = client
         .callTool(
           { name: "jev_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } },
-          undefined,
           { signal: controller.signal },
         )
         .then(
@@ -539,7 +538,6 @@ test("typesafe provider cancellation aborts promptly through the SDK without cra
       const pending = client
         .callTool(
           { name: "jev_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } },
-          undefined,
           { signal: controller.signal },
         )
         .then(
