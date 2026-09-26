@@ -1036,20 +1036,27 @@ test("jev_classify fallback class ids never collide with explicit ones", async (
 test("jev_classify tallies __proto__ and constructor class ids as plain keys", async () => {
   // A null-prototype tally keeps prototype-named class ids countable instead
   // of swallowing them (__proto__) or reading inherited values (constructor).
+  // The expected object is JSON.parsed because an object literal would not
+  // create an own "__proto__" key — the very trap this test pins down.
   await withMock(() => ({
-    i0: pick("c0", ["c0", "c1", "c2"]),
+    i0: pick("c0", ["c0", "c1"]),
+    i1: pick("c1", ["c0", "c1"]),
+    i2: pick("c0", ["c0", "c1"]),
   }), async (client) => {
     const body = payload(await client.callTool({ name: "jev_classify", arguments: {
-      items: [{ id: "message", text: "I was charged twice." }],
+      items: [
+        { id: "first", text: "I was charged twice." },
+        { id: "second", text: "Do you offer discounts?" },
+        { id: "third", text: "How do I export an invoice?" },
+      ],
       classes: [
         { id: "__proto__", description: "Payments and refunds" },
         { id: "constructor", description: "Pricing and discounts" },
-        { id: "technical", description: "Technical support" },
       ],
     } }));
     assert.equal(body.results[0].classification, "__proto__");
-    assert.ok(Object.hasOwn(body.summary.by_class, "__proto__"));
-    assert.equal(body.summary.by_class["__proto__"], 1);
+    assert.equal(body.results[1].classification, "constructor");
+    assert.deepEqual(body.summary.by_class, JSON.parse('{"__proto__":2,"constructor":1}'));
   });
 });
 
