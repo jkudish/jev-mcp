@@ -27,7 +27,7 @@
     "build": "tsc",
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/unit.test.mjs test/mock.test.mjs test/provider.test.mjs test/typesafe-abort-regression.test.mjs",
+    "test": "node --test test/unit.test.mjs test/mock.test.mjs test/provider.test.mjs test/typesafe-abort-regression.test.mjs test/http.test.mjs",
     "test:e2e": "node --test test/e2e.test.mjs"
   },
   "keywords": [
@@ -43,11 +43,13 @@
   ],
   "dependencies": {
     "@jkudish/jev-agent-tools": "^0.1.0",
-    "@modelcontextprotocol/sdk": "^1.17.0",
+    "@modelcontextprotocol/node": "^2.1.0",
+    "@modelcontextprotocol/server": "^2.1.0",
     "@typesafe-ai/sdk": "^0.6.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^7.0.2"
   },

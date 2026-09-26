@@ -128,6 +128,20 @@ args = ["-y", "@jkudish/jev-mcp"]
 
 Some MCP clients filter the environment before spawning servers, which silently drops `TYPESAFE_API_KEY`. If the server reports a missing key, pass it explicitly as shown above.
 
+### Remote / HTTP
+
+Stdio is the default. To host one shared server for a team or a remote agent, run it in stateless HTTP mode:
+
+```bash
+JEV_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" TYPESAFE_API_KEY=ts_... npx -y @jkudish/jev-mcp --http
+```
+
+It listens on `PORT` (default `8080`) and `HOST` (default `0.0.0.0`), serves MCP at `/mcp` and a health check at `/health`. It speaks MCP 2026-07-28 and falls back to stateless serving for 2025-era clients, so it keeps no sessions and scales behind any load balancer. Every call spends your Jev key, so `JEV_MCP_AUTH_TOKEN` is required unless `HOST` is loopback. Clients send it as a bearer token:
+
+```bash
+claude mcp add --transport http jev https://jev.example.com/mcp --header "Authorization: Bearer $JEV_MCP_AUTH_TOKEN"
+```
+
 ### Agent skill
 
 The package ships an agent skill (`skills/jev/`) that teaches coding agents when to reach for each tool instead of answering from their own reading — the difference between tools that sit registered-but-unused and tools that get called. Copy it into your client's skills directory:

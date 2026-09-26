@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Opt-in stateless Streamable HTTP: `jev-mcp --http` (or `JEV_MCP_TRANSPORT=http`) serves MCP 2026-07-28 per request and 2025-era clients through the SDK's stateless fallback, with no sessions, on `PORT` (default 8080) at `/mcp`, with `/health`. `JEV_MCP_AUTH_TOKEN` gates it with a bearer token and is required unless `HOST` is loopback. Stdio stays the default.
+- Stdio now also answers 2026-07-28 clients; 2025-era clients see no change.
+- Internal: `@modelcontextprotocol/sdk` 1.x replaced by the v2 packages `@modelcontextprotocol/server` and `@modelcontextprotocol/node` 2.1.0; tools are registered once and replayed onto a fresh server per connection or request.
+
 ## 0.9.0
 
 - Ships an agent skill inside the package: `skills/jev/` is included in the npm tarball, so coding agents get judgment-tool policy — which tool to call when, fail-closed handling, privacy — without hand-written prompts. Prompted by [#34](https://github.com/jkudish/jev-mcp/issues/34) by panaalexandrucristian.
