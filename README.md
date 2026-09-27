@@ -330,6 +330,8 @@ Assign each item to one class from a shared catalog, in one batched request: the
 - Up to 250 classes and 64 items per call, with an 8,000 item-class budget per batch (split larger waves into multiple calls); item text is truncated at 2,000 characters.
 - A malformed or incomplete model response is reported as `status: invalid_response` on that item, never as model uncertainty. The chosen class must have the maximum probability (ties and differences within `1e-9` are accepted); otherwise that item returns `invalid_response`.
 
+For a runnable Exa search → classification pipeline with preserved source URLs and review routing, see the [Exa classification example](examples/exa-classify.md).
+
 ### jev_decide
 
 One bounded decision, 2-6 candidates, evidence, and explicit priorities. Jev returns a Choice distribution over the candidates plus escape hatches, and a per-candidate per-requirement check, in one request.

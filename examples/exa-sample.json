@@ -1,0 +1,7 @@
+{
+  "results": [
+    { "url": "https://example.org/sdk", "title": "Example SDK reference", "text": "This synthetic fixture documents an SDK with install instructions, method signatures, and parameter definitions." },
+    { "url": "https://example.org/tutorial", "title": "Example integration guide", "highlights": ["This synthetic fixture walks through building and running a search application step by step."] },
+    { "url": "https://example.org/unknown", "title": "Unknown page", "text": "" }
+  ]
+}
