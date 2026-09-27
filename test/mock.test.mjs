@@ -460,6 +460,150 @@ test("the retry allowlist is 408, 409, 429, and 500 through 599", async () => {
   );
 });
 
+const siliconflowEnv = (port, overrides = {}) => ({
+  JEV_PROVIDER: "siliconflow",
+  SILICONFLOW_API_KEY: "siliconflow-test-key",
+  JEV_SILICONFLOW_BASE_URL: `http://127.0.0.1:${port}`,
+  ...overrides,
+});
+
+test("siliconflow provider sends the standard request to the configured endpoint", async () => {
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      const body = payload(result);
+      assert.equal(body.tool, "jev_verify");
+      assert.equal(body.provider, "siliconflow");
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].method, "POST");
+      assert.equal(requests[0].path, "/v1/systemone");
+      assert.equal(requests[0].headers.authorization, "Bearer siliconflow-test-key");
+      assert.match(requests[0].headers["content-type"], /^application\/json/);
+      assert.equal(requests[0].body.model, "semif");
+      assert.deepEqual(requests[0].body.state.claims, [{ text: "The patch is ready", id: "claim0" }]);
+    },
+    siliconflowEnv,
+    { model: "semif" },
+  );
+});
+
+test("siliconflow provider maps the jev-latest alias to semif on the wire", async () => {
+  // JEV_MCP_MODEL is unset: the global jev-latest default must not reach the
+  // SiliconFlow endpoint verbatim; the transport maps it to the current alias.
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client, requests) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      const body = payload(result);
+      assert.equal(body.provider, "siliconflow");
+      assert.equal(body.model, "semif");
+      assert.equal(requests[0].body.model, "semif");
+    },
+    (port) => siliconflowEnv(port),
+  );
+});
+
+test("siliconflow provider auto-selects when its key is the only configured provider", async () => {
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client) => {
+      const body = payload(await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      }));
+      assert.equal(body.provider, "siliconflow");
+      assert.equal(body.results[0].verdict, "verified");
+    },
+    (port) =>
+      siliconflowEnv(port, {
+        JEV_PROVIDER: "",
+        TYPESAFE_API_KEY: "",
+        TYPESAFE_BASE_URL: "",
+      }),
+  );
+});
+
+test("siliconflow provider reports non-2xx status without upstream body text", async () => {
+  // The 401 body echoes the Authorization header; nothing from the upstream
+  // body may reach the MCP-visible error — fixed provider name and status only.
+  await withMock(
+    {},
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /SiliconFlow API 401/);
+      assert.ok(!result.content[0].text.includes("Unauthorized client"));
+      assert.ok(!result.content[0].text.includes("siliconflow-test-key"));
+    },
+    siliconflowEnv,
+    { status: 401, raw: JSON.stringify({ error: "Unauthorized client for Bearer siliconflow-test-key" }) },
+  );
+});
+
+test("siliconflow provider rejects a malformed response", async () => {
+  await withMock(
+    null,
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /invalid response/i);
+    },
+    siliconflowEnv,
+    { raw: "not json at all" },
+  );
+});
+
+test("siliconflow provider without a key is a configuration error, not a silent fallback", async () => {
+  await withMock(
+    {},
+    async (client) => {
+      const result = await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /SILICONFLOW_API_KEY is not set/);
+    },
+    (port) => siliconflowEnv(port, { SILICONFLOW_API_KEY: "" }),
+  );
+});
+
+test("siliconflow auto-selection outranks a complete compatible credential pair", async () => {
+  // Both a dedicated provider key and a compatible endpoint are configured:
+  // the dedicated provider wins the auto-detection order.
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client) => {
+      const body = payload(await client.callTool({
+        name: "jev_verify",
+        arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
+      }));
+      assert.equal(body.provider, "siliconflow");
+    },
+    (port) =>
+      siliconflowEnv(port, {
+        JEV_PROVIDER: "auto",
+        TYPESAFE_API_KEY: "",
+        TYPESAFE_BASE_URL: "",
+        JEV_API_KEY: "compatible-test-key",
+        JEV_API_BASE_URL: `http://127.0.0.1:${port}/v1/systemone`,
+      }),
+  );
+});
+
 test("openrouter provider keeps a malformed 200 body out of client-visible errors", async () => {
   // Node's parse errors quote the malformed input; a 200 body reflecting the
   // key must not leak even a snippet. The error is fixed-string status only.

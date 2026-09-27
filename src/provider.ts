@@ -1,12 +1,13 @@
 // Jev transport: TypeSafe direct (default), OpenRouter Decisions, Cloudflare
-// Workers AI, or a caller-supplied Jev-compatible System One endpoint. All
-// speak the {state, questions} / answers contract; URL, auth, and model slugs
-// differ. Proxies add hops, so direct TypeSafe remains the recommended default.
+// Workers AI, SiliconFlow, or a caller-supplied Jev-compatible System One
+// endpoint. All speak the {state, questions} / answers contract; URL, auth,
+// and model slugs differ. Proxies add hops, so direct TypeSafe remains the
+// recommended default.
 
 import { ask, resolveTransport, type JevTransport, type JevTransportReply } from "@jkudish/jev-agent-tools";
 import { isRecord } from "./lib.js";
 
-export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible";
+export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible" | "siliconflow";
 
 export interface AskResult {
   answers: Record<string, any>;
@@ -218,6 +219,16 @@ async function fetchWithResilience(url: string, init: RequestInit, deadline: Dea
 function resolve(env: NodeJS.ProcessEnv): JevProvider {
   const explicit = (env.JEV_PROVIDER ?? "auto").toLowerCase();
   const hasCompatible = Boolean(env.JEV_API_KEY && env.JEV_API_BASE_URL);
+  const hasSiliconFlow = Boolean(env.SILICONFLOW_API_KEY);
+  if (explicit === "siliconflow") {
+    if (!env.SILICONFLOW_API_KEY) {
+      throw new Error(
+        "JEV_PROVIDER=siliconflow but SILICONFLOW_API_KEY is not set. " +
+          "JEV_MCP_MODEL is optional and defaults to semif.",
+      );
+    }
+    return "siliconflow";
+  }
   if (explicit === "compatible") {
     const missing = ["JEV_API_KEY", "JEV_API_BASE_URL"].filter((name) => !env[name]);
     if (missing.length > 0) {
@@ -228,6 +239,12 @@ function resolve(env: NodeJS.ProcessEnv): JevProvider {
     }
     return "compatible";
   }
+  // A dedicated provider credential outranks the generic compatible fallback:
+  // SiliconFlow auto-selects when its key is the only one configured.
+  if ((explicit === "auto" || explicit === "") && hasSiliconFlow &&
+      !env.TYPESAFE_API_KEY && !/^sk-or-/.test(env.OPENROUTER_API_KEY ?? "") &&
+      !((env.JEV_CLOUDFLARE_API_TOKEN || env.CLOUDFLARE_API_TOKEN) && env.CLOUDFLARE_ACCOUNT_ID) &&
+      !env.AI_GATEWAY_API_KEY) return "siliconflow";
   // The published package owns the four built-in credential rules and order.
   if ((explicit === "auto" || explicit === "") && hasCompatible &&
       !env.TYPESAFE_API_KEY && !/^sk-or-/.test(env.OPENROUTER_API_KEY ?? "") &&
@@ -382,6 +399,65 @@ export async function askJev(
         usage: { input_tokens: inputTokens, output_tokens: outputTokens },
         provider,
         model: typeof body.model === "string" ? body.model : model,
+      };
+    } finally {
+      deadline.dispose();
+    }
+  }
+
+  if (provider === "siliconflow") {
+    // SiliconFlow serves the System One contract at a fixed path. The root is
+    // overridable like the OpenRouter and Cloudflare roots so tests can point
+    // it at a local mock; unknown models go to the wire verbatim and the
+    // endpoint owns rejecting them.
+    const SILICONFLOW_LATEST = "semif";
+    const effective = model === "jev-latest" ? SILICONFLOW_LATEST : model;
+    const deadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetchWithResilience(apiUrl(process.env.JEV_SILICONFLOW_BASE_URL || "https://api.siliconflow.cn", "/v1/systemone"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.SILICONFLOW_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: effective, state, questions }),
+      }, deadline);
+      const bodyText = await readBodyBounded(response, deadline);
+      if (!response.ok) {
+        // Client-visible errors stay fixed-string: provider name and numeric
+        // status only — a reflecting endpoint can echo nothing back through them.
+        throw new Error(`SiliconFlow API ${response.status}`);
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        body = null; // parse failures never retry; surface as invalid response
+      }
+      const invalid = (why: string) => new Error(`SiliconFlow API returned an invalid response: ${why}`);
+      if (!isRecord(body)) throw invalid("expected a JSON object.");
+      if (!isRecord(body.answers)) throw invalid("expected an answers object.");
+      // Envelope shape is validated here; per-question answer validity is the
+      // tools' job. Each tool fails closed under its invalid_response contract,
+      // so a missing or malformed answer can never reach tool-level defaults.
+      let inputTokens = 0;
+      let outputTokens = 0;
+      if (body.usage !== undefined && body.usage !== null) {
+        const tokenCount = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+        if (!isRecord(body.usage) || !tokenCount(body.usage.input_tokens) || !tokenCount(body.usage.output_tokens)) {
+          throw invalid("usage must report finite non-negative input_tokens and output_tokens.");
+        }
+        inputTokens = body.usage.input_tokens;
+        outputTokens = body.usage.output_tokens;
+      }
+      if (body.model !== undefined && body.model !== null && typeof body.model !== "string") {
+        throw invalid("model must be absent or a string.");
+      }
+      return {
+        answers: body.answers,
+        usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+        provider,
+        model: typeof body.model === "string" ? body.model : effective,
       };
     } finally {
       deadline.dispose();

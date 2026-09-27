@@ -670,7 +670,7 @@ Built-in provider selection runs through the shared [@jkudish/jev-agent-tools](h
 - **Cloudflare Workers AI** (`CLOUDFLARE_API_TOKEN` or `JEV_CLOUDFLARE_API_TOKEN`, plus `CLOUDFLARE_ACCOUNT_ID`).
 - **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`).
 
-`JEV_PROVIDER` forces one, or `compatible` for any System One-compatible endpoint. Unknown names and missing credentials are configuration errors, never silent fallbacks. For resilience reasons the OpenRouter, Cloudflare, and compatible transports are implemented locally; see [Transport resilience](#transport-resilience).
+`JEV_PROVIDER` forces one (`typesafe`, `openrouter`, `cloudflare`, `vercel`, `siliconflow`), or `compatible` for any System One-compatible endpoint. Unknown names and missing credentials are configuration errors, never silent fallbacks. For resilience reasons the OpenRouter, Cloudflare, SiliconFlow, and compatible transports are implemented locally; see [Transport resilience](#transport-resilience).
 
 The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/jev-agent-tools#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
 
@@ -680,7 +680,8 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `OPENROUTER_API_KEY` | none | OpenRouter `sk-or-` key; used when `TYPESAFE_API_KEY` is absent. |
 | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | none | Cloudflare Workers AI; used when no other provider key is present. `JEV_CLOUDFLARE_API_TOKEN` is honored first for separate credentials. |
 | `AI_GATEWAY_API_KEY` | none | Vercel AI Gateway; used when no other provider key is present. |
-| `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, or `compatible` instead of auto-detection. |
+| `SILICONFLOW_API_KEY` | none | [SiliconFlow](https://www.siliconflow.cn) (硅基流动); used when no other provider key is present. Useful for callers where TypeSafe or OpenRouter is hard to reach. |
+| `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, `siliconflow`, or `compatible` instead of auto-detection. |
 | `JEV_MCP_MODEL` | `jev-latest` | Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
 | `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
 | `JEV_API_BASE_URL` + `JEV_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `JEV_PROVIDER=compatible`. `JEV_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
@@ -688,10 +689,11 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `JEV_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on the fetch-based transports; retries happen only on 408, 409, 429, and 500 through 599. |
 | `JEV_OPENROUTER_BASE_URL` | `https://openrouter.ai/api` | Override the OpenRouter API root (the `/alpha/decisions` path is appended; a trailing slash is tolerated). |
 | `JEV_CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Override the Cloudflare API root (`/accounts/<id>/ai/run` is appended; a trailing slash is tolerated). |
+| `JEV_SILICONFLOW_BASE_URL` | `https://api.siliconflow.cn` | Override the SiliconFlow API root (the `/v1/systemone` path is appended; a trailing slash is tolerated). |
 
 ### Transport resilience
 
-The fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpoint) retry only on the standard not-processed status set (408, 409, 429, and 500 through 599), with jittered exponential backoff, at most `JEV_MCP_MAX_ATTEMPTS` total attempts, all inside one `JEV_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry, non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error bodies on those transports are redacted, so a reflecting endpoint can never echo a configured key into MCP-visible errors. Direct TypeSafe and Vercel calls use `@jkudish/jev-agent-tools`, whose direct fetch path avoids the SDK cancellation crash ([typesafe-sdk-js#2](https://github.com/typesafe-ai/typesafe-sdk-js/issues/2)); no retry or deadline uniformity is claimed for those two. Research and the original report: [issue #23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.
+The fetch-based transports (OpenRouter, Cloudflare, SiliconFlow, and the Jev-compatible endpoint) retry only on the standard not-processed status set (408, 409, 429, and 500 through 599), with jittered exponential backoff, at most `JEV_MCP_MAX_ATTEMPTS` total attempts, all inside one `JEV_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry, non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error bodies on those transports are redacted, so a reflecting endpoint can never echo a configured key into MCP-visible errors. Direct TypeSafe and Vercel calls use `@jkudish/jev-agent-tools`, whose direct fetch path avoids the SDK cancellation crash ([typesafe-sdk-js#2](https://github.com/typesafe-ai/typesafe-sdk-js/issues/2)); no retry or deadline uniformity is claimed for those two. Research and the original report: [issue #23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.
 
 ### Vercel
 
@@ -704,6 +706,15 @@ With `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set (and no other provid
 ### OpenRouter
 
 If you already have an OpenRouter key, that is all you need: with no `TYPESAFE_API_KEY` present, every call goes through OpenRouter's Decisions API at identical pricing. The endpoint is alpha and adds a hop, and OpenRouter serves pinned versions rather than a `latest` alias, so the default `jev-latest` maps to `typesafe/jev-1.13` there. Direct TypeSafe remains the recommended default when you have both keys.
+
+### SiliconFlow
+
+With `SILICONFLOW_API_KEY` set (and no other provider key), judgments run through SiliconFlow's System One endpoint at `https://api.siliconflow.cn/v1/systemone`. This is the practical carrier where TypeSafe and OpenRouter are hard to reach; the key comes from the [SiliconFlow console](https://www.siliconflow.cn). The default `jev-latest` maps to SiliconFlow's current alias `semif`; pass `JEV_MCP_MODEL` to pin another model the endpoint serves — unknown model names are sent verbatim and rejected by the endpoint rather than rewritten. Auto-detection outranks the compatible fallback when both are configured; force it with `JEV_PROVIDER=siliconflow`.
+
+```bash
+export JEV_PROVIDER=siliconflow
+export SILICONFLOW_API_KEY=your-siliconflow-key
+```
 
 ### Jev-compatible endpoints
 
