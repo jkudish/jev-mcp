@@ -751,9 +751,17 @@ tools.registerTool(
         .boolean()
         .optional()
         .describe("Include ask_user / investigate / none as Choosable options so the model can decline to rank. Default true."),
+      escalate_on_contradiction: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, a recommendation whose own requirement checks came back contradicted returns " +
+            "selected: null with status \"escalate\" instead of the candidate id (the jev_verify vocabulary). " +
+            "Default false keeps the recommendation and warns.",
+        ),
     }),
   },
-  async ({ decision, evidence, priorities, candidates, requirements: reqs, escape_hatches }, ctx) => {
+  async ({ decision, evidence, priorities, candidates, requirements: reqs, escape_hatches, escalate_on_contradiction }, ctx) => {
     const includeHatches = escape_hatches ?? true;
     const requirements = reqs ?? [];
 
@@ -830,6 +838,9 @@ tools.registerTool(
           keyToId.get(recommendedKey) ?? "",
         )
       : [];
+    // Escalation is opt-in and never re-selects: the model's recommendation is
+    // withdrawn, not replaced, so no fabricated choice reaches the caller.
+    const escalating = Boolean(escalate_on_contradiction) && contradicted.length > 0;
 
     return text({
       tool: "jev_decide",
@@ -837,14 +848,18 @@ tools.registerTool(
       provider,
       recommendation: rec
         ? {
-            selected: candidateKeySet.has(recommendedKey!) ? (keyToId.get(recommendedKey!) ?? recommendedKey!) : recommendedKey!,
-            escaped: recommendedKey !== null && !candidateKeySet.has(recommendedKey),
+            selected: escalating
+              ? null
+              : candidateKeySet.has(recommendedKey!) ? (keyToId.get(recommendedKey!) ?? recommendedKey!) : recommendedKey!,
+            escaped: escalating ? false : recommendedKey !== null && !candidateKeySet.has(recommendedKey),
             confidence: rec.confidence,
             probabilities: Object.fromEntries(
               Object.entries(recProbabilities).map(([k, p]) => [candidateKeySet.has(k) ? keyToId.get(k) : k, p]),
             ),
+            contradicted_requirements: contradicted,
+            ...(escalating ? { status: "escalate" as const } : {}),
           }
-        : { selected: null, escaped: null, confidence: null, probabilities: null, status: "invalid_response" },
+        : { selected: null, escaped: null, confidence: null, probabilities: null, contradicted_requirements: [], status: "invalid_response" },
       requirements_checked: requirements.length,
       checks,
       warnings:

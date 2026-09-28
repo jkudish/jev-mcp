@@ -352,14 +352,16 @@ One bounded decision, 2-6 candidates, evidence, and explicit priorities. Jev ret
 // live result, abridged
 {
   "recommendation": { "selected": "poll", "escaped": false, "confidence": 1,
-                      "probabilities": { "poll": 1, "push": 0, "ask_user": 0 } },
+                      "probabilities": { "poll": 1, "push": 0, "ask_user": 0 },
+                      "contradicted_requirements": [] },
   "checks": [ { "candidate": "poll", "requirement": 0, "answer": "supported" },
               { "candidate": "push", "requirement": 0, "answer": "contradicted" } ]
 }
 ```
 
 - Escape hatches (`ask_user`, `investigate`, `none`) let the model decline to rank when a preference or fact is missing; `escaped: true` in the result marks it. Disable with `escape_hatches: false` for closed-world choices.
-- Requirement checks run as independent questions in the same request and may disagree with the recommendation; a contradiction on the recommended candidate surfaces as a warning.
+- Requirement checks run as independent questions in the same request and may disagree with the recommendation; `recommendation.contradicted_requirements` names the zero-based requirement indexes whose checks came back `contradicted` for the selected candidate, and a contradiction also surfaces as a warning.
+- Pass `escalate_on_contradiction: true` to withdraw a contradicted recommendation instead of warning: the result comes back `selected: null` with `status: "escalate"` (the `jev_verify` vocabulary), probabilities and `contradicted_requirements` intact. The default keeps the recommendation and warns. No re-selection: a withdrawn recommendation is never silently replaced by the runner-up.
 - One call per unchanged decision. Repeat only with materially new evidence or criteria.
 
 <sub>Pattern credit: [thesammykins/jev_ampcode](https://github.com/thesammykins/jev_ampcode).</sub>

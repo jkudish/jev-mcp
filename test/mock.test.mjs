@@ -1249,6 +1249,66 @@ test("jev_decide accepts a candidate id named constructor", async () => {
   });
 });
 
+test("jev_decide exposes contradicted requirements structurally and keeps the recommendation by default", async () => {
+  // option_0 (postgres) is recommended while its own requirement check comes
+  // back contradicted: the default keeps selected, adds the structural array
+  // and the warning.
+  await withMock(() => ({
+    recommendation: pick("option_0", REC_KEYS),
+    check_0_0: pick("contradicted", CHECK_KEYS),
+    check_1_0: pick("contradicted", CHECK_KEYS),
+  }), async (client) => {
+    const result = await client.callTool({ name: "jev_decide", arguments: DECIDE_ARGS });
+    const body = payload(result);
+    assert.equal(body.recommendation.selected, "postgres");
+    assert.equal(body.recommendation.status, undefined);
+    assert.deepEqual(body.recommendation.contradicted_requirements, [0]);
+    assert.equal(body.checks[0].answer, "contradicted");
+    assert.match(body.warnings[0], /Requirement 1 contradicted by the recommended candidate/);
+  });
+});
+
+test("jev_decide escalate_on_contradiction withdraws a contradicted recommendation without re-selecting", async () => {
+  await withMock(() => ({
+    recommendation: pick("option_0", REC_KEYS),
+    check_0_0: pick("contradicted", CHECK_KEYS),
+    check_1_0: pick("supported", CHECK_KEYS),
+  }), async (client) => {
+    const result = await client.callTool({
+      name: "jev_decide",
+      arguments: { ...DECIDE_ARGS, escalate_on_contradiction: true },
+    });
+    const body = payload(result);
+    assert.equal(body.recommendation.selected, null);
+    assert.equal(body.recommendation.escaped, false);
+    assert.equal(body.recommendation.status, "escalate");
+    assert.deepEqual(body.recommendation.contradicted_requirements, [0]);
+    // The withdrawn recommendation stays inspectable; no runner-up is promoted.
+    assert.equal(body.recommendation.probabilities.postgres, 0.95);
+    assert.equal(Object.hasOwn(body.recommendation.probabilities, "sqlite"), true);
+    assert.match(body.warnings[0], /contradicted/);
+  });
+});
+
+test("jev_decide escalate_on_contradiction keeps a non-contradicted recommendation", async () => {
+  await withMock(() => ({
+    recommendation: pick("option_1", REC_KEYS),
+    check_0_0: pick("contradicted", CHECK_KEYS),
+    check_1_0: pick("supported", CHECK_KEYS),
+  }), async (client) => {
+    const result = await client.callTool({
+      name: "jev_decide",
+      arguments: { ...DECIDE_ARGS, escalate_on_contradiction: true },
+    });
+    const body = payload(result);
+    // The contradiction belongs to option_0, not the recommendation (option_1).
+    assert.equal(body.recommendation.selected, "sqlite");
+    assert.equal(body.recommendation.status, undefined);
+    assert.deepEqual(body.recommendation.contradicted_requirements, []);
+    assert.deepEqual(body.warnings, []);
+  });
+});
+
 // ── jev_review / jev_gate ────────────────────────────────────────────────────
 
 const REVIEW_KEYS = ["correctness", "spec_match", "test_gap", "blast_radius"];
