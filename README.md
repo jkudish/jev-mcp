@@ -352,6 +352,7 @@ One bounded decision, 2-6 candidates, evidence, and explicit priorities. Jev ret
 // live result, abridged
 {
   "recommendation": { "selected": "poll", "escaped": false, "confidence": 1,
+                      "contradicted_requirements": [],
                       "probabilities": { "poll": 1, "push": 0, "ask_user": 0 } },
   "checks": [ { "candidate": "poll", "requirement": 0, "answer": "supported" },
               { "candidate": "push", "requirement": 0, "answer": "contradicted" } ]
@@ -359,7 +360,7 @@ One bounded decision, 2-6 candidates, evidence, and explicit priorities. Jev ret
 ```
 
 - Escape hatches (`ask_user`, `investigate`, `none`) let the model decline to rank when a preference or fact is missing; `escaped: true` in the result marks it. Disable with `escape_hatches: false` for closed-world choices.
-- Requirement checks run as independent questions in the same request and may disagree with the recommendation; a contradiction on the recommended candidate surfaces as a warning.
+- Requirement checks run as independent questions in the same request and may disagree with the recommendation. `recommendation.contradicted_requirements` lists the zero-based indexes of requirements contradicted by the selected candidate; the same disagreement also surfaces as a warning.
 - One call per unchanged decision. Repeat only with materially new evidence or criteria.
 
 <sub>Pattern credit: [thesammykins/jev_ampcode](https://github.com/thesammykins/jev_ampcode).</sub>

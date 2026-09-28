@@ -1200,6 +1200,7 @@ test("jev_decide recommendation that is not the argmax is invalid_response", asy
     const body = payload(result);
     assert.equal(body.recommendation.status, "invalid_response");
     assert.equal(body.recommendation.selected, null);
+    assert.deepEqual(body.recommendation.contradicted_requirements, []);
     assert.equal(body.recommendation.probabilities, null);
   });
 });
@@ -1220,12 +1221,28 @@ test("jev_decide normalizes non-finite confidence to null without discarding the
   await withMock(() => ({
     recommendation: { ...pick("option_1", REC_KEYS), confidence: 1.7 },
     check_0_0: pick("supported", CHECK_KEYS),
+    check_1_0: pick("supported", CHECK_KEYS),
   }), async (client) => {
     const result = await client.callTool({ name: "jev_decide", arguments: DECIDE_ARGS });
     const body = payload(result);
     assert.equal(body.recommendation.selected, "sqlite");
     assert.equal(body.recommendation.confidence, null);
+    assert.deepEqual(body.recommendation.contradicted_requirements, []);
     assert.equal(body.checks[0].answer, "supported");
+  });
+});
+
+test("jev_decide surfaces contradictions on the recommended candidate structurally", async () => {
+  await withMock(() => ({
+    recommendation: pick("option_1", REC_KEYS),
+    check_0_0: pick("supported", CHECK_KEYS),
+    check_1_0: pick("contradicted", CHECK_KEYS),
+  }), async (client) => {
+    const result = await client.callTool({ name: "jev_decide", arguments: DECIDE_ARGS });
+    const body = payload(result);
+    assert.equal(body.recommendation.selected, "sqlite");
+    assert.deepEqual(body.recommendation.contradicted_requirements, [0]);
+    assert.match(body.warnings[0], /Requirement 1 contradicted/);
   });
 });
 

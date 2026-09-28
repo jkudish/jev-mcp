@@ -840,11 +840,12 @@ tools.registerTool(
             selected: candidateKeySet.has(recommendedKey!) ? (keyToId.get(recommendedKey!) ?? recommendedKey!) : recommendedKey!,
             escaped: recommendedKey !== null && !candidateKeySet.has(recommendedKey),
             confidence: rec.confidence,
+            contradicted_requirements: contradicted,
             probabilities: Object.fromEntries(
               Object.entries(recProbabilities).map(([k, p]) => [candidateKeySet.has(k) ? keyToId.get(k) : k, p]),
             ),
           }
-        : { selected: null, escaped: null, confidence: null, probabilities: null, status: "invalid_response" },
+        : { selected: null, escaped: null, confidence: null, contradicted_requirements: [], probabilities: null, status: "invalid_response" },
       requirements_checked: requirements.length,
       checks,
       warnings:
