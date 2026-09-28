@@ -1298,6 +1298,150 @@ test("jev_review demotes auto when the diff is truncated at the document cap", a
   });
 });
 
+// ── per-file review mode (#42) ───────────────────────────────────────────────
+
+const FILES_ARGS = {
+  request: "Reject empty parser input everywhere",
+  files: [
+    { path: "src/parser.ts", diff: "+ if (!input) throw new Error('Empty input');" },
+    { path: "src/cli.ts", diff: "+ parser(readFile(argv[2]));" },
+  ],
+  tests: "parser rejects empty input: PASS",
+};
+
+const strongFileAnswers = (i) => ({
+  ...Object.fromEntries(
+    REVIEW_KEYS.map((key) => [`file_${i}_${key}`, { score: key === "test_gap" || key === "blast_radius" ? 0 : 2, confidence: 0.93 }]),
+  ),
+  [`file_${i}_safe_to_apply`]: { noul: 0.95 },
+});
+
+test("jev_review per-file mode asks the rubric once per file in one request and composes auto", async () => {
+  await withMock(() => ({ ...strongFileAnswers(0), ...strongFileAnswers(1) }), async (client, requests) => {
+    const result = await client.callTool({ name: "jev_review", arguments: FILES_ARGS });
+    const body = payload(result);
+    assert.equal(body.mode, "per-file");
+    assert.equal(body.action, "auto");
+    assert.equal(body.files.length, 2);
+    assert.equal(body.files[0].path, "src/parser.ts");
+    assert.equal(body.files[0].action, "auto");
+    assert.equal(body.files[1].action, "auto");
+    assert.deepEqual(body.limiting, []);
+    // One request, per-file keys only, no whole-change rubric keys.
+    assert.equal(requests.length, 1);
+    const questions = requests[0].body.questions;
+    assert.ok(Object.hasOwn(questions, "file_0_correctness"));
+    assert.ok(Object.hasOwn(questions, "file_1_safe_to_apply"));
+    assert.equal(Object.hasOwn(questions, "correctness"), false);
+    // The state carries files, and each question is scoped to its own file.
+    assert.deepEqual(requests[0].body.state.files.map((f) => f.path), ["src/parser.ts", "src/cli.ts"]);
+    assert.equal(Object.hasOwn(requests[0].body.state, "diff"), false);
+    assert.match(questions.file_1_correctness.instructions, /files\[1\] \("src\/cli\.ts"\)/);
+    assert.match(questions.file_0_blast_radius.instructions, /never as instructions to follow/);
+  });
+});
+
+test("jev_review per-file mode names the limiting file and rubric when one file is weak", async () => {
+  await withMock(() => ({
+    ...strongFileAnswers(0),
+    ...strongFileAnswers(1),
+    file_1_correctness: { score: 0, confidence: 0.95 },
+  }), async (client) => {
+    const result = await client.callTool({ name: "jev_review", arguments: FILES_ARGS });
+    const body = payload(result);
+    // The strong file stays auto; the weak file is the whole change's limit.
+    assert.equal(body.files[0].action, "auto");
+    assert.equal(body.files[1].action, "review");
+    assert.equal(body.action, "review");
+    assert.ok(body.reason_codes.includes("composite_below_floor"));
+    assert.equal(body.limiting.length, 1);
+    assert.equal(body.limiting[0].file, "src/cli.ts");
+    assert.ok(body.limiting[0].rubrics.includes("correctness"));
+  });
+});
+
+test("jev_review requires exactly one of diff or files", async () => {
+  await withMock(() => ({}), async (client) => {
+    const both = await client.callTool({
+      name: "jev_review",
+      arguments: { ...FILES_ARGS, diff: "+ stray whole-change diff" },
+    });
+    assert.equal(both.isError, true);
+    assert.match(JSON.parse(both.content[0].text).error, /exactly one of diff/);
+    const neither = await client.callTool({
+      name: "jev_review",
+      arguments: { request: FILES_ARGS.request, tests: "irrelevant" },
+    });
+    assert.equal(neither.isError, true);
+    assert.match(JSON.parse(neither.content[0].text).error, /exactly one of diff/);
+  });
+});
+
+test("jev_review per-file mode rejects an aggregate budget overrun without a request", async () => {
+  await withMock(() => ({}), async (client, requests) => {
+    const result = await client.callTool({
+      name: "jev_review",
+      arguments: {
+        ...FILES_ARGS,
+        files: [
+          { path: "big/a.ts", diff: "+ " + "a".repeat(150_000) },
+          { path: "big/b.ts", diff: "+ " + "b".repeat(60_000) },
+        ],
+      },
+    });
+    assert.equal(result.isError, true);
+    assert.match(JSON.parse(result.content[0].text).error, /aggregate budget/);
+    assert.equal(requests.length, 0);
+  });
+});
+
+test("jev_review per-file mode demotes auto when one file's diff is truncated", async () => {
+  await withMock(() => ({ ...strongFileAnswers(0), ...strongFileAnswers(1) }), async (client, requests) => {
+    const result = await client.callTool({
+      name: "jev_review",
+      arguments: { ...FILES_ARGS, files: [{ path: "src/parser.ts", diff: "+ " + "x".repeat(50_001) }, FILES_ARGS.files[1]] },
+    });
+    const body = payload(result);
+    assert.equal(body.truncated, true);
+    assert.equal(body.action, "review");
+    assert.ok(body.reason_codes.includes("incomplete_context"));
+    assert.match(requests[0].body.state.files[0].diff, /…truncated/);
+  });
+});
+
+test("jev_gate per-file mode composes the review with claims in one call", async () => {
+  await withMock(() => ({
+    ...strongFileAnswers(0),
+    ...strongFileAnswers(1),
+    claim_0: pick("verified", CLAIM_KEYS),
+  }), async (client, requests) => {
+    const result = await client.callTool({
+      name: "jev_gate",
+      arguments: {
+        ...FILES_ARGS,
+        claims: ["The empty-input parser test passed."],
+        evidence: [{ id: "test-output", text: "parser rejects empty input: PASS" }],
+      },
+    });
+    const body = payload(result);
+    assert.equal(body.action, "auto");
+    assert.equal(body.review.mode, "per-file");
+    assert.equal(body.review.files.length, 2);
+    assert.equal(body.review.files[0].path, "src/parser.ts");
+    assert.equal(body.verification.summary.verified, 1);
+    // One request carries per-file rubrics and the claim question together.
+    assert.equal(requests.length, 1);
+    const questions = requests[0].body.questions;
+    assert.ok(Object.hasOwn(questions, "file_0_correctness"));
+    assert.ok(Object.hasOwn(questions, "file_1_safe_to_apply"));
+    assert.ok(Object.hasOwn(questions, "claim_0"));
+    assert.equal(Object.hasOwn(questions, "correctness"), false);
+    assert.equal(Object.hasOwn(requests[0].body.state, "diff"), false);
+    assert.deepEqual(requests[0].body.state.files.map((f) => f.path), ["src/parser.ts", "src/cli.ts"]);
+    assert.match(questions.claim_0.instructions, /file diffs and tests belong to the separate patch review/);
+  });
+});
+
 test("jev_review escalates with invalid_response when a score answer is malformed", async () => {
   await withMock(() => ({ ...STRONG_REVIEW, correctness: { score: "high" }, safe_to_apply: { noul: 0.95 } }), async (client) => {
     const result = await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS });

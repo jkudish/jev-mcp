@@ -251,6 +251,15 @@ export const MAX_GATE_EVIDENCE_CHARS = 200_000;
 /** Per-document cap (characters) for request, diff, tests, and evidence texts. */
 export const MAX_REVIEW_DOC_CHARS = 50_000;
 
+/** Max files in one per-file review (jev_review / jev_gate files mode). */
+export const MAX_REVIEW_FILES = 16;
+
+/** Aggregate per-file diff budget (characters) for one per-file review, before per-file truncation. */
+export const MAX_REVIEW_FILES_TOTAL_CHARS = 200_000;
+
+/** Per-file path cap (characters) in per-file review; paths are identifiers, not documents. */
+export const MAX_REVIEW_FILE_PATH_CHARS = 500;
+
 /** Per-claim cap (characters) in jev_gate; claims are bounded assertions. */
 export const MAX_CLAIM_CHARS = 2_000;
 
