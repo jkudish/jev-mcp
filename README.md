@@ -143,6 +143,8 @@ It listens on `PORT` (default `8080`) and serves MCP at `/mcp`, with a health ch
 claude mcp add --transport http jev https://jev.example.com/mcp --header "Authorization: Bearer $JEV_MCP_AUTH_TOKEN"
 ```
 
+Some clients can only be configured with a URL and cannot send headers, such as claude.ai custom connectors. For those, set `JEV_MCP_PATH_TOKEN=1` and give the client `https://jev.example.com/mcp/<token>`; the segment is compared raw, in constant time, against `JEV_MCP_AUTH_TOKEN`. It is off by default because a URL is easier to leak than a header: it can surface in proxy and access logs and in shared configs, so treat the whole URL as the secret and rotate the token if it escapes. The header form keeps working alongside it.
+
 The server itself speaks plain HTTP: terminate TLS at a reverse proxy or load balancer before exposing it beyond loopback, and put connection limits and request rate limits at that ingress. The process bounds admitted `/mcp` requests (`JEV_MCP_MAX_CONCURRENCY`, default 16; excess shed with `429`) and caps request bodies at 4 MiB, but it does not limit sockets waiting to finish headers or repeatedly rejected requests. The tool list is static: the server advertises no `listChanged` capability and refuses `subscriptions/listen` requests, so an idle listener cannot hold one of the concurrency slots. Clients that never open a listener, the common case, see no difference.
 
 ### Agent skill

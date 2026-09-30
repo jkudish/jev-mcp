@@ -203,3 +203,49 @@ test("--http sheds load with 429 past JEV_MCP_MAX_CONCURRENCY", async () => {
     await stop();
   }
 });
+
+// Raw request so the path reaches the server byte-for-byte (no URL normalization).
+function rawPost(url, path, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: url.hostname, port: url.port, path, method: "POST", headers: {
+      "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18", ...headers,
+    } }, (res) => { res.resume(); resolve(res.statusCode); });
+    req.on("error", reject);
+    req.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+  });
+}
+
+test("--http ignores /mcp/<token> unless JEV_MCP_PATH_TOKEN=1", async () => {
+  const { url, stop } = await startHttp({ JEV_MCP_AUTH_TOKEN: TOKEN });
+  try {
+    assert.equal(await rawPost(url, `/mcp/${TOKEN}`), 404);
+  } finally {
+    await stop();
+  }
+});
+
+test("--http with JEV_MCP_PATH_TOKEN=1 accepts /mcp/<token> and rejects wrong or malformed tokens", async () => {
+  const { url, stop } = await startHttp({ JEV_MCP_AUTH_TOKEN: TOKEN, JEV_MCP_PATH_TOKEN: "1" });
+  try {
+    assert.equal(await rawPost(url, `/mcp/${TOKEN}`), 200);
+    assert.equal(await rawPost(url, "/mcp/wrong-token"), 401);
+    // A malformed escape must be a plain 401, not a URIError that kills the process.
+    assert.equal(await rawPost(url, "/mcp/%E0%A4%A"), 401);
+    assert.equal(await rawPost(url, `/mcp/${TOKEN}/extra`), 401);
+    assert.equal(await rawPost(url, "/mcp", { authorization: `Bearer ${TOKEN}` }), 200);
+    assert.equal(await rawPost(url, "/mcp"), 401);
+    assert.equal((await fetch(new URL("/health", url))).status, 200);
+  } finally {
+    await stop();
+  }
+});
+
+test("--http refuses JEV_MCP_PATH_TOKEN=1 without JEV_MCP_AUTH_TOKEN", { timeout: 10_000 }, async (t) => {
+  const child = spawn(process.execPath, [serverPath, "--http"], {
+    env: { PATH: process.env.PATH, TYPESAFE_API_KEY: "test-key", HOST: "127.0.0.1", PORT: "0", JEV_MCP_PATH_TOKEN: "1" },
+    stdio: "ignore",
+  });
+  t.after(() => child.kill("SIGKILL"));
+  const [code] = await once(child, "exit");
+  assert.notEqual(code, 0);
+});

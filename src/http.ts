@@ -42,18 +42,30 @@ export async function serveHttp(factory: () => McpServer, env: NodeJS.ProcessEnv
   const port = Number(env.PORT || 8080);
   const token = Buffer.from(env.JEV_MCP_AUTH_TOKEN ?? "");
   const maxInFlight = Number(env.JEV_MCP_MAX_CONCURRENCY ?? 16);
+  // Opt-in for clients that can only be configured with a URL (claude.ai custom
+  // connectors, some cloud agents): the token may also arrive as /mcp/<token>.
+  const pathToken = env.JEV_MCP_PATH_TOKEN === "1";
   // The server spends the operator's Jev key on every call; never expose it unauthenticated.
   if (token.length === 0 && !LOOPBACK.has(host)) {
     throw new Error("JEV_MCP_AUTH_TOKEN is required when HTTP mode binds a non-loopback HOST");
+  }
+  if (pathToken && token.length === 0) {
+    throw new Error("JEV_MCP_PATH_TOKEN requires JEV_MCP_AUTH_TOKEN");
   }
   if (!Number.isInteger(maxInFlight) || maxInFlight < 1) {
     throw new Error("JEV_MCP_MAX_CONCURRENCY must be a positive integer");
   }
 
-  const authorized = (header: string | undefined) => {
-    if (token.length === 0) return true;
-    const given = Buffer.from(header?.startsWith("Bearer ") ? header.slice(7) : "");
+  const matches = (candidate: string) => {
+    const given = Buffer.from(candidate);
     return given.length === token.length && timingSafeEqual(given, token);
+  };
+  const authorized = (header: string | undefined, fromPath: string | undefined) => {
+    if (token.length === 0) return true;
+    // The path segment is compared raw, never URI-decoded: decoding throws on
+    // malformed escapes, and a throw here would take down the process.
+    if (fromPath !== undefined) return matches(fromPath);
+    return matches(header?.startsWith("Bearer ") ? header.slice(7) : "");
   };
 
   // On loopback, reject foreign Host/Origin headers so a web page cannot reach
@@ -75,13 +87,14 @@ export async function serveHttp(factory: () => McpServer, env: NodeJS.ProcessEnv
   let inFlight = 0;
   const server = createNodeServer((req, res) => {
     const path = (req.url ?? "/").split("?")[0];
+    const fromPath = pathToken && path.startsWith("/mcp/") ? path.slice("/mcp/".length) : undefined;
     if (path === "/health") {
       res.writeHead(200, { "content-type": "text/plain" }).end("ok");
-    } else if (path !== "/mcp") {
+    } else if (path !== "/mcp" && fromPath === undefined) {
       res.writeHead(404).end();
     } else if (onLoopback && (!isLoopbackHost(req.headers.host) || !isLoopbackOrigin(req.headers.origin))) {
       forbidden(res);
-    } else if (!authorized(req.headers.authorization)) {
+    } else if (!authorized(req.headers.authorization, fromPath)) {
       res.writeHead(401, { "www-authenticate": "Bearer" }).end();
     } else if (inFlight >= maxInFlight) {
       // Backpressure: each in-flight request replays tools and may spend the
