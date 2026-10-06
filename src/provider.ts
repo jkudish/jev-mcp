@@ -45,6 +45,17 @@ const MAX_RETRY_DELAY_MS = 4_000;
 /** Stream-checked ceiling for success and error bodies alike. */
 const MAX_RESPONSE_BYTES = 1_000_000;
 
+/** Only fixed codes are exposed; upstream messages may reflect credentials. */
+export function safeErrorType(bodyText: string): string | undefined {
+  try {
+    const body = JSON.parse(bodyText);
+    const code = body?.detail?.error_type;
+    return ["max_tokens_exceeded", "invalid_request", "rate_limit_exceeded"].includes(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Only the not-processed status allowlist is retried, and 5xx means 500-599: out-of-range statuses are protocol noise, not retry signals. */
 const isRetryableStatus = (status: number) => status === 408 || status === 409 || status === 429 || (status >= 500 && status <= 599);
 
@@ -298,6 +309,7 @@ export async function askJev(
     const slug = effective.startsWith("typesafe/") ? effective : `typesafe/${effective}`;
     const deadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
     try {
+      const requestBody = JSON.stringify({ model: slug, state, questions });
       const response = await fetchWithResilience(apiUrl(process.env.JEV_OPENROUTER_BASE_URL || "https://openrouter.ai/api", "/alpha/decisions"), {
         method: "POST",
         headers: {
@@ -307,13 +319,13 @@ export async function askJev(
           "X-Title": X_TITLE,
           "X-OpenRouter-Title": X_TITLE,
         },
-        body: JSON.stringify({ model: slug, state, questions }),
+        body: requestBody,
       }, deadline);
       const bodyText = await readBodyBounded(response, deadline);
       if (!response.ok) {
-        // Client-visible errors stay fixed-string: provider name and numeric
-        // status only, never interpolated upstream response text.
-        throw new Error(`OpenRouter decisions API ${response.status}`);
+        const code = safeErrorType(bodyText);
+        const detail = code ? ` (${code}; request_bytes=${Buffer.byteLength(requestBody, "utf8")})` : "";
+        throw new Error(`OpenRouter decisions API ${response.status}${detail}`);
       }
       let body: any;
       try {

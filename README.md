@@ -129,6 +129,13 @@ args = ["-y", "@jkudish/jev-mcp"]
 
 Some MCP clients filter the environment before spawning servers, which silently drops `TYPESAFE_API_KEY`. If the server reports a missing key, pass it explicitly as shown above.
 
+OpenRouter errors expose the numeric status and, for known structured errors,
+an allow-listed error type and serialized request byte count. For example,
+`OpenRouter decisions API 400 (max_tokens_exceeded; request_bytes=136198)`
+identifies a token-budget rejection. The byte count is diagnostic metadata,
+not a token count. Upstream error messages and unknown error types remain hidden
+because they can reflect credentials or request content.
+
 ### Remote / HTTP
 
 Stdio is the default. To host one shared server for a team or a remote agent, run it in stateless HTTP mode:
