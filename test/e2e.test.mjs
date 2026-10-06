@@ -21,6 +21,9 @@ async function withClient(fn) {
     env: {
       TYPESAFE_API_KEY: process.env.TYPESAFE_API_KEY ?? "",
       ...(process.env.JEV_MCP_MODEL ? { JEV_MCP_MODEL: process.env.JEV_MCP_MODEL } : {}),
+      // Optional carrier override for A/B runs, e.g. JEV_PROVIDER=openai with JEV_OPENAI_API_KEY.
+      ...(process.env.JEV_PROVIDER ? { JEV_PROVIDER: process.env.JEV_PROVIDER } : {}),
+      ...(process.env.JEV_OPENAI_API_KEY ? { JEV_OPENAI_API_KEY: process.env.JEV_OPENAI_API_KEY } : {}),
     },
   });
   await client.connect(transport);

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- OpenAI Decisions provider (spike): `JEV_PROVIDER=openai` with `JEV_OPENAI_API_KEY` or `OPENAI_API_KEY`, via the shared `@jkudish/jev-agent-tools` transport. Never auto-detected. Refusals invalidate only the refused judgment. Requires the unreleased jev-agent-tools OpenAI transport.
+
 ## 0.14.1
 
 - OpenRouter: token-limit rejections report `OpenRouter decisions API 400 (max_tokens_exceeded)`; unknown error types and all upstream text stay hidden. Via [#57](https://github.com/jkudish/jev-mcp/pull/57) by [@nicolas-found42](https://github.com/nicolas-found42).
