@@ -761,6 +761,7 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `OPENROUTER_API_KEY` | none | OpenRouter `sk-or-` key; used when `TYPESAFE_API_KEY` is absent. |
 | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | none | Cloudflare Workers AI; used when no other provider key is present. `JEV_CLOUDFLARE_API_TOKEN` is honored first for separate credentials. |
 | `AI_GATEWAY_API_KEY` | none | Vercel AI Gateway; used when no other provider key is present. |
+| `JEV_VERCEL_ZERO_DATA_RETENTION` | off | Set to `1` or `true` to request per-request zero data retention on the Vercel carrier. See [Vercel](#vercel). |
 | `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, or `compatible` instead of auto-detection. |
 | `JEV_MCP_MODEL` | `jev-latest` | Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
 | `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
@@ -777,6 +778,8 @@ The fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpo
 ### Vercel
 
 With `AI_GATEWAY_API_KEY` set, judgments run through the Vercel AI Gateway at `typesafe-ai/jev`, using the shared wire package's evaluation request. Answers are adapted back to this package's shapes, including TypeSafe's confidence statistic. Gateway calls appear in Vercel logs and budgets.
+
+Set `JEV_VERCEL_ZERO_DATA_RETENTION=1` (or `true`) to send `providerOptions.gateway.zeroDataRetention` with every request, so the gateway only routes to providers that do not retain data. It applies per request and does not depend on the team-wide dashboard setting. If no zero-data-retention provider is available the gateway fails the request rather than falling back, so it fails closed. Unset, requests are unchanged, and the variable has no effect on the other carriers. It needs a `@jkudish/jev-agent-tools` release that includes [jev-agent-tools#7](https://github.com/jkudish/jev-agent-tools/pull/7).
 
 ### Cloudflare
 
