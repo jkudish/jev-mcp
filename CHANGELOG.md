@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.1
+
+- OpenRouter: token-limit rejections report `OpenRouter decisions API 400 (max_tokens_exceeded)`; unknown error types and all upstream text stay hidden. Via [#57](https://github.com/jkudish/jev-mcp/pull/57) by [@nicolas-found42](https://github.com/nicolas-found42).
+
 ## 0.14.0
 
 - OpenRouter: `jev-latest` uses `~typesafe/jev-latest`, an explicit alias is no longer double-prefixed, and results report the returned snapshot. Explicit pins are unchanged. Reported in [#55](https://github.com/jkudish/jev-mcp/issues/55).

@@ -493,6 +493,7 @@ test("openrouter token budget error is diagnosable without reflected secrets", a
     [message('HTTP 400: {"detail":{"error_type":"max_tokens_exceeded synthetic-secret"}}'), "OpenRouter decisions API 400"],
     [message('Model typesafe/synthetic-secret does not exist'), "OpenRouter decisions API 400"],
     [message('HTTP 400: {not json synthetic-secret'), "OpenRouter decisions API 400"],
+    [JSON.stringify({ error: { message: { error_type: "max_tokens_exceeded", secret: "synthetic-secret" }, code: 400 } }), "OpenRouter decisions API 400"],
     [JSON.stringify({ detail: { error_type: "max_tokens_exceeded" } }), "OpenRouter decisions API 400"],
   ]) {
     await withMock({}, async (client, requests) => {
