@@ -510,6 +510,52 @@ test("openrouter provider redacts a reflected key from error bodies", async () =
   );
 });
 
+test("openrouter provider uses the latest alias and reports the effective model", async () => {
+  const answers = { c0: { type: "choice", choice: "supports", probabilities: { supports: 1, contradicts: 0, says_nothing: 0 } } };
+  for (const [model, requested, returned, expected] of [
+    [undefined, "~typesafe/jev-latest", "typesafe/jev-1.13-20260917", "typesafe/jev-1.13-20260917"],
+    ["~typesafe/jev-latest", "~typesafe/jev-latest", undefined, "~typesafe/jev-latest"],
+    ["typesafe/jev-1.13", "typesafe/jev-1.13", undefined, "typesafe/jev-1.13"],
+  ]) {
+    await withMock(
+      answers,
+      async (client, requests) => {
+        const result = await client.callTool({ name: "jev_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } });
+        assert.notEqual(result.isError, true);
+        assert.equal(requests[0].body.model, requested);
+        assert.equal(JSON.parse(result.content[0].text).model, expected);
+      },
+      (port) => ({ JEV_PROVIDER: "openrouter", OPENROUTER_API_KEY: "sk-or-test", JEV_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}`, ...(model ? { JEV_MCP_MODEL: model } : {}) }),
+      returned ? { model: returned } : {},
+    );
+  }
+  for (const malformed of [null, 1, "", " "]) {
+    await withMock(
+      answers,
+      async (client) => {
+        const result = await client.callTool({ name: "jev_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } });
+        assert.equal(result.isError, true);
+        assert.match(result.content[0].text, /OpenRouter decisions API 200 returned an invalid model/);
+      },
+      (port) => ({ JEV_PROVIDER: "openrouter", OPENROUTER_API_KEY: "sk-or-test", JEV_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}` }),
+      { model: malformed },
+    );
+  }
+});
+
+test("vercel zero data retention rejects an invalid setting before a request", async () => {
+  await withMock(
+    {},
+    async (client, requests) => {
+      const result = await client.callTool({ name: "jev_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /JEV_VERCEL_ZERO_DATA_RETENTION must be unset, empty, 0, false, 1, or true\./);
+      assert.equal(requests.length, 0);
+    },
+    { JEV_PROVIDER: "vercel", AI_GATEWAY_API_KEY: "test-gateway", JEV_VERCEL_ZERO_DATA_RETENTION: "yes" },
+  );
+});
+
 test("cloudflare provider redacts the token on every error path", async () => {
   const cfEnv = (port) => ({
     JEV_PROVIDER: "cloudflare",

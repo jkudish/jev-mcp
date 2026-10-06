@@ -1,6 +1,6 @@
 {
   "name": "@jkudish/jev-mcp",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "MCP server exposing TypeSafe Jev as purpose-built judgment tools: verify claims, screen for injection, find, rerank, classify, decide, compare passages, extract fields, review patches, and gate completion claims, each with typed probabilities.",
   "type": "module",
   "license": "MIT",
@@ -46,7 +46,7 @@
     "semantic-search"
   ],
   "dependencies": {
-    "@jkudish/jev-agent-tools": "^0.1.4",
+    "@jkudish/jev-agent-tools": "^0.2.0",
     "@modelcontextprotocol/node": "^2.1.1",
     "@modelcontextprotocol/server": "^2.3.1",
     "@typesafe-ai/sdk": "^0.6.0",

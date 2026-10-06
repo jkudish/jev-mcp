@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0
+
+- OpenRouter: `jev-latest` uses `~typesafe/jev-latest`, an explicit alias is no longer double-prefixed, and results report the returned snapshot. Explicit pins are unchanged. Reported in [#55](https://github.com/jkudish/jev-mcp/issues/55).
+- Vercel: opt-in Gateway zero-data-retention routing with `JEV_VERCEL_ZERO_DATA_RETENTION=1`, via `@jkudish/jev-agent-tools` 0.2.0 ([jev-agent-tools#7](https://github.com/jkudish/jev-agent-tools/pull/7)). Docs via [#56](https://github.com/jkudish/jev-mcp/pull/56) by [@lloydsilvertwo](https://github.com/lloydsilvertwo).
+- Dependency updates: MCP SDK 2.3.1.
+
 ## 0.13.0
 
 - `jev_verify`: contradictions now require evidence about the claim's own subject. Off-subject contradictions become `unsupported` and require review; missing subject judgments also require review. Via [#54](https://github.com/jkudish/jev-mcp/pull/54) by [@deadczarvc](https://github.com/deadczarvc), prompted by [#53](https://github.com/jkudish/jev-mcp/issues/53).

@@ -761,6 +761,7 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `OPENROUTER_API_KEY` | none | OpenRouter `sk-or-` key; used when `TYPESAFE_API_KEY` is absent. |
 | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | none | Cloudflare Workers AI; used when no other provider key is present. `JEV_CLOUDFLARE_API_TOKEN` is honored first for separate credentials. |
 | `AI_GATEWAY_API_KEY` | none | Vercel AI Gateway; used when no other provider key is present. |
+| `JEV_VERCEL_ZERO_DATA_RETENTION` | unset | `1` or `true` asks the Vercel AI Gateway to route only through its zero-data-retention providers; use with `JEV_PROVIDER=vercel`. See [Vercel](#vercel). |
 | `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, or `compatible` instead of auto-detection. |
 | `JEV_MCP_MODEL` | `jev-latest` | Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
 | `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
@@ -778,13 +779,20 @@ The fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpo
 
 With `AI_GATEWAY_API_KEY` set, judgments run through the Vercel AI Gateway at `typesafe-ai/jev`, using the shared wire package's evaluation request. Answers are adapted back to this package's shapes, including TypeSafe's confidence statistic. Gateway calls appear in Vercel logs and budgets.
 
+- Set `JEV_VERCEL_ZERO_DATA_RETENTION=1` or `true` to send `providerOptions.gateway.zeroDataRetention: true` with every Gateway request.
+- This is Vercel's per-request zero data retention (ZDR) routing restriction. The Gateway routes only through providers that have ZDR agreements with Vercel, including fallbacks. If none is available for the model, the Gateway rejects the request.
+- Vercel offers it on Pro and Enterprise plans. See [Vercel's ZDR docs](https://vercel.com/docs/ai-gateway/security-and-compliance/zdr) for the current provider list, terms, and exceptions.
+- Unset, empty, `0`, or `false` (case-insensitive) leaves requests unchanged. Any other value is a configuration error before a request is sent.
+- Only the Vercel carrier reads the setting. Auto-selection prefers TypeSafe, OpenRouter, and Cloudflare when their keys are present, so set `JEV_PROVIDER=vercel` when every judgment must carry this restriction.
+- It is a Gateway routing restriction under Vercel and provider policies, not an end-to-end no-retention guarantee. It does not control this server, your MCP client, their logs, or other providers.
+
 ### Cloudflare
 
 With `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set (and no other provider key), judgments run through Cloudflare Workers AI at `typesafe/jev`, the single always-current alias. Usage tokens come back on every call. Cloudflare serves one alias rather than pinned versions, and pricing is listed in the Cloudflare dashboard. Direct TypeSafe remains the recommended default when you have several keys.
 
 ### OpenRouter
 
-If you already have an OpenRouter key, that is all you need: with no `TYPESAFE_API_KEY` present, every call goes through OpenRouter's Decisions API at identical pricing. The endpoint is alpha and adds a hop, and OpenRouter serves pinned versions rather than a `latest` alias, so the default `jev-latest` maps to `typesafe/jev-1.13` there. Direct TypeSafe remains the recommended default when you have both keys.
+If you already have an OpenRouter key, that is all you need: with no `TYPESAFE_API_KEY` present, every call goes through OpenRouter's Decisions API at identical pricing. The endpoint is alpha and adds a hop. The default `jev-latest` uses OpenRouter's moving `~typesafe/jev-latest` alias; pin `typesafe/jev-1.13` for reproducible routing. Results report the snapshot OpenRouter returns. Direct TypeSafe remains the recommended default when you have both keys.
 
 ### Jev-compatible endpoints
 

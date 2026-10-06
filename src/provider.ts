@@ -3,7 +3,7 @@
 // speak the {state, questions} / answers contract; URL, auth, and model slugs
 // differ. Proxies add hops, so direct TypeSafe remains the recommended default.
 
-import { ask, resolveTransport, type JevTransport, type JevTransportReply } from "@jkudish/jev-agent-tools";
+import { ask, openrouterJevModel, resolveTransport, type JevTransport, type JevTransportReply } from "@jkudish/jev-agent-tools";
 import { isRecord } from "./lib.js";
 
 export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible";
@@ -291,11 +291,9 @@ export async function askJev(
   }
 
   if (provider === "openrouter") {
-    // OpenRouter has no redirecting "latest" slug; map it to the current
-    // release. Pin exact versions with the model env var when that matters.
-    const OPENROUTER_LATEST = "jev-1.13";
-    const effective = model === "jev-latest" ? OPENROUTER_LATEST : model;
-    const slug = effective.startsWith("typesafe/") ? effective : `typesafe/${effective}`;
+    // The shared package owns Jev model names; this local path keeps MCP's
+    // deadline, retry, body-size, and base-URL behavior.
+    const slug = openrouterJevModel(model);
     const deadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
     try {
       const response = await fetchWithResilience(apiUrl(process.env.JEV_OPENROUTER_BASE_URL || "https://openrouter.ai/api", "/alpha/decisions"), {
@@ -323,12 +321,15 @@ export async function askJev(
         // must not leak even a snippet through a 200 body.
         throw new Error(`OpenRouter decisions API ${response.status} returned an unparseable response`);
       }
+      if (isRecord(body) && Object.hasOwn(body, "model") && (typeof body.model !== "string" || !body.model.trim())) {
+        throw new Error(`OpenRouter decisions API ${response.status} returned an invalid model`);
+      }
       return {
         answers: body.answers ?? {},
         // The decisions endpoint does not document a usage block; tolerate absence.
         usage: { input_tokens: body.usage?.input_tokens ?? 0, output_tokens: body.usage?.output_tokens ?? 0 },
         provider,
-        model: slug,
+        model: isRecord(body) && Object.hasOwn(body, "model") ? body.model as string : slug,
       };
     } finally {
       deadline.dispose();
