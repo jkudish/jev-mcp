@@ -1,15 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ask } from "@jkudish/jev-agent-tools";
-import { safeErrorType } from "../dist/provider.js";
-
-test("provider error details expose allow-listed codes without reflecting text", () => {
-  assert.equal(safeErrorType(JSON.stringify({ detail: { error_type: "max_tokens_exceeded", message: "Bearer synthetic-secret" } })), "max_tokens_exceeded");
-  for (const value of ["Bearer synthetic-secret", "max_tokens_exceeded synthetic-secret", null, {}, ["max_tokens_exceeded"]]) {
-    assert.equal(safeErrorType(JSON.stringify({ detail: { error_type: value } })), undefined);
-  }
-  assert.equal(safeErrorType("Bearer synthetic-secret {"), undefined);
-});
 
 test("shared wire validator distinguishes a malformed judgment from a failed request", async () => {
   const input = {

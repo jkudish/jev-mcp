@@ -485,13 +485,24 @@ test("openrouter provider keeps a malformed 200 body out of client-visible error
 });
 
 test("openrouter token budget error is diagnosable without reflected secrets", async () => {
-  await withMock({}, async (client, requests) => {
-    const result = await client.callTool({ name: "jev_verify", arguments: { claims: ["ready"], evidence: "tests pass" } });
-    assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /OpenRouter decisions API 400 \(max_tokens_exceeded; request_bytes=\d+\)/);
-    assert.ok(!result.content[0].text.includes("synthetic-secret"));
-    assert.equal(requests.length, 1);
-  }, port => ({ JEV_PROVIDER: "openrouter", OPENROUTER_API_KEY: "sk-or-v1-synthetic-secret", JEV_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}/` }), { status: 400, raw: JSON.stringify({ detail: { error_type: "max_tokens_exceeded", message: "Bearer synthetic-secret" } }) });
+  const env = (port) => ({ JEV_PROVIDER: "openrouter", OPENROUTER_API_KEY: "sk-or-v1-synthetic-secret", JEV_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}/` });
+  const message = (text) => JSON.stringify({ error: { message: text, code: 400 } });
+  for (const [raw, expected] of [
+    [message('HTTP 400: {"detail":{"error_type":"max_tokens_exceeded","message":"Bearer synthetic-secret"}}'), "OpenRouter decisions API 400 (max_tokens_exceeded)"],
+    [message('HTTP 400: {"detail":{"error_type":"unknown_secret_type","message":"Bearer synthetic-secret"}}'), "OpenRouter decisions API 400"],
+    [message('HTTP 400: {"detail":{"error_type":"max_tokens_exceeded synthetic-secret"}}'), "OpenRouter decisions API 400"],
+    [message('Model typesafe/synthetic-secret does not exist'), "OpenRouter decisions API 400"],
+    [message('HTTP 400: {not json synthetic-secret'), "OpenRouter decisions API 400"],
+    [JSON.stringify({ detail: { error_type: "max_tokens_exceeded" } }), "OpenRouter decisions API 400"],
+  ]) {
+    await withMock({}, async (client, requests) => {
+      const result = await client.callTool({ name: "jev_verify", arguments: { claims: ["ready"], evidence: "tests pass" } });
+      assert.equal(result.isError, true);
+      assert.equal(result.content[0].text, expected);
+      assert.ok(!result.content[0].text.includes("synthetic-secret"));
+      assert.equal(requests.length, 1);
+    }, env, { status: 400, raw });
+  }
 });
 
 test("openrouter provider redacts a reflected key from error bodies", async () => {

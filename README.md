@@ -129,13 +129,6 @@ args = ["-y", "@jkudish/jev-mcp"]
 
 Some MCP clients filter the environment before spawning servers, which silently drops `TYPESAFE_API_KEY`. If the server reports a missing key, pass it explicitly as shown above.
 
-OpenRouter errors expose the numeric status and, for known structured errors,
-an allow-listed error type and serialized request byte count. For example,
-`OpenRouter decisions API 400 (max_tokens_exceeded; request_bytes=136198)`
-identifies a token-budget rejection. The byte count is diagnostic metadata,
-not a token count. Upstream error messages and unknown error types remain hidden
-because they can reflect credentials or request content.
-
 ### Remote / HTTP
 
 Stdio is the default. To host one shared server for a team or a remote agent, run it in stateless HTTP mode:
@@ -800,6 +793,8 @@ With `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set (and no other provid
 ### OpenRouter
 
 If you already have an OpenRouter key, that is all you need: with no `TYPESAFE_API_KEY` present, every call goes through OpenRouter's Decisions API at identical pricing. The endpoint is alpha and adds a hop. The default `jev-latest` uses OpenRouter's moving `~typesafe/jev-latest` alias; pin `typesafe/jev-1.13` for reproducible routing. Results report the snapshot OpenRouter returns. Direct TypeSafe remains the recommended default when you have both keys.
+
+When a Jev request exceeds its token limit, OpenRouter errors report `OpenRouter decisions API 400 (max_tokens_exceeded)`. Other upstream text and unknown error types stay hidden because they can echo credentials or request content.
 
 ### Jev-compatible endpoints
 

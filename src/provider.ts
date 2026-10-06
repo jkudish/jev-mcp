@@ -45,12 +45,23 @@ const MAX_RETRY_DELAY_MS = 4_000;
 /** Stream-checked ceiling for success and error bodies alike. */
 const MAX_RESPONSE_BYTES = 1_000_000;
 
-/** Only fixed codes are exposed; upstream messages may reflect credentials. */
-export function safeErrorType(bodyText: string): string | undefined {
+const SAFE_OPENROUTER_ERROR_TYPES = new Set(["max_tokens_exceeded"]);
+
+/**
+ * OpenRouter's Decisions envelope is { error: { code, message } }. For an
+ * oversized Jev request, live responses wrap TypeSafe's typed body inside the
+ * message as `HTTP 400: {"detail":{"error_type":"max_tokens_exceeded"}}`.
+ * Expose only allow-listed constants; never return upstream text.
+ */
+function safeOpenRouterErrorType(bodyText: string): string | undefined {
   try {
     const body = JSON.parse(bodyText);
-    const code = body?.detail?.error_type;
-    return ["max_tokens_exceeded", "invalid_request", "rate_limit_exceeded"].includes(code) ? code : undefined;
+    const message = body?.error?.message;
+    if (typeof message !== "string") return undefined;
+    const wrapped = message.match(/^HTTP 4\d\d: (\{.*\})$/s);
+    if (!wrapped) return undefined;
+    const code = JSON.parse(wrapped[1])?.detail?.error_type;
+    return typeof code === "string" && SAFE_OPENROUTER_ERROR_TYPES.has(code) ? code : undefined;
   } catch {
     return undefined;
   }
@@ -307,7 +318,6 @@ export async function askJev(
     const slug = openrouterJevModel(model);
     const deadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
     try {
-      const requestBody = JSON.stringify({ model: slug, state, questions });
       const response = await fetchWithResilience(apiUrl(process.env.JEV_OPENROUTER_BASE_URL || "https://openrouter.ai/api", "/alpha/decisions"), {
         method: "POST",
         headers: {
@@ -317,13 +327,12 @@ export async function askJev(
           "X-Title": X_TITLE,
           "X-OpenRouter-Title": X_TITLE,
         },
-        body: requestBody,
+        body: JSON.stringify({ model: slug, state, questions }),
       }, deadline);
       const bodyText = await readBodyBounded(response, deadline);
       if (!response.ok) {
-        const code = safeErrorType(bodyText);
-        const detail = code ? ` (${code}; request_bytes=${Buffer.byteLength(requestBody, "utf8")})` : "";
-        throw new Error(`OpenRouter decisions API ${response.status}${detail}`);
+        const code = safeOpenRouterErrorType(bodyText);
+        throw new Error(`OpenRouter decisions API ${response.status}${code ? ` (${code})` : ""}`);
       }
       let body: any;
       try {
