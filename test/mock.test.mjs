@@ -2819,3 +2819,49 @@ test("jev_verify scopes all questions by index, leaving directives in state only
     assert.deepEqual(body.results.map(r => r.verdict), ["contradicted", "unsupported"]);
   });
 });
+
+// OpenAI Decisions wire: an answers array keyed by question name. The shared
+// package translates both directions; these tests pin the MCP-visible result.
+const openaiEnv = (port) => ({ JEV_PROVIDER: "openai", OPENAI_API_KEY: "openai-test-key", JEV_OPENAI_BASE_URL: `http://127.0.0.1:${port}/v1`, TYPESAFE_API_KEY: "" });
+const openaiAnswers = (refuse = []) => (request) => request.questions.map((q) => {
+  if (refuse.includes(q.name)) return { type: "refusal", name: q.name };
+  if (q.choices.every((c) => typeof c.value === "boolean")) return { type: "choice", name: q.name, choice: true, probabilities: [{ value: true, probability: 0.9 }, { value: false, probability: 0.1 }], confidence: 0.8 };
+  const winner = q.choices[0].value;
+  return { type: "choice", name: q.name, choice: winner, probabilities: q.choices.map((c) => ({ value: c.value, probability: c.value === winner ? 1 : 0 })), confidence: 0.9 };
+});
+
+test("openai provider translates the request and returns per-claim verdicts", async () => {
+  await withMock(openaiAnswers(), async (client, requests) => {
+    const body = payload(await client.callTool({ name: "jev_verify", arguments: VERIFY_ARGS }));
+    assert.equal(body.provider, "openai");
+    assert.equal(body.model, "gpt-6-luna");
+    assert.equal(body.results[0].verdict, "verified");
+    assert.equal(body.results[0].confidence, 0.9);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].path, "/v1/decisions");
+    assert.equal(requests[0].headers.authorization, "Bearer openai-test-key");
+    assert.equal(requests[0].body.model, "gpt-6-luna");
+    assert.equal(typeof requests[0].body.input, "string");
+    assert.deepEqual(requests[0].body.questions.map((q) => [q.type, q.name]), [["choice", "relation_claim0"], ["choice", "subject_claim0"]]);
+    assert.deepEqual(requests[0].body.questions[1].choices.map((c) => c.value), [true, false]);
+    assert.match(requests[0].body.input, /^State \(JSON\):\n\{/);
+  }, openaiEnv);
+});
+
+test("openai refusal invalidates only the refused judgment", async () => {
+  await withMock(openaiAnswers(["relation_claim1"]), async (client) => {
+    const body = payload(await client.callTool({ name: "jev_verify", arguments: { claims: ["The sky is blue.", "The grass is green."], evidence: "The sky is blue and the grass is green." } }));
+    assert.equal(body.results[0].verdict, "verified");
+    assert.equal(body.results[1].status, "invalid_response");
+    assert.equal(body.results[1].verdict, "unknown");
+  }, openaiEnv);
+});
+
+test("openai is never auto-selected from OPENAI_API_KEY alone", async () => {
+  await withMock(openaiAnswers(), async (client, requests) => {
+    const result = await client.callTool({ name: "jev_verify", arguments: VERIFY_ARGS });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /JEV_PROVIDER=openai/);
+    assert.equal(requests.length, 0);
+  }, (port) => ({ ...openaiEnv(port), JEV_PROVIDER: "" }));
+});
