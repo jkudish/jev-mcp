@@ -1,20 +1,21 @@
 {
-  "name": "@jkudish/jev-mcp",
-  "version": "0.14.1",
-  "description": "MCP server exposing TypeSafe Jev as purpose-built judgment tools: verify claims, screen for injection, find, rerank, classify, decide, compare passages, extract fields, review patches, and gate completion claims, each with typed probabilities.",
+  "name": "@jkudish/discern-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for calibrated judgment tools: verify claims, screen for injection, find, rerank, classify, decide, compare passages, extract fields, review patches, and gate completion claims, each with typed probabilities. Runs on TypeSafe Jev by default or OpenAI's Decisions API.",
   "type": "module",
   "license": "MIT",
   "author": "Joey Kudish",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jkudish/jev-mcp.git"
+    "url": "git+https://github.com/jkudish/discern-mcp.git"
   },
   "bin": {
-    "jev-mcp": "dist/index.js"
+    "discern-mcp": "dist/index.js"
   },
   "exports": {
     ".": "./dist/server.js",
-    "./server": "./dist/server.js"
+    "./server": "./dist/server.js",
+    "./bin": "./dist/index.js"
   },
   "files": [
     "dist",
@@ -31,14 +32,16 @@
     "build": "tsc",
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/unit.test.mjs test/mock.test.mjs test/provider.test.mjs test/typesafe-abort-regression.test.mjs test/http.test.mjs test/exa-example.test.mjs test/server.test.mjs test/hook-gate.test.mjs",
+    "test": "node --test test/unit.test.mjs test/mock.test.mjs test/provider.test.mjs test/typesafe-abort-regression.test.mjs test/http.test.mjs test/exa-example.test.mjs test/server.test.mjs test/aliases.test.mjs test/compat.test.mjs test/embed.test.mjs test/hook-gate.test.mjs",
     "test:e2e": "node --test test/e2e.test.mjs"
   },
   "keywords": [
     "mcp",
     "model-context-protocol",
+    "discern",
     "typesafe",
     "jev",
+    "openai-decisions",
     "system-one",
     "ai",
     "verification",
@@ -46,7 +49,7 @@
     "semantic-search"
   ],
   "dependencies": {
-    "@jkudish/jev-agent-tools": "^0.2.0",
+    "@jkudish/discern-agent-tools": "^1.0.0",
     "@modelcontextprotocol/node": "^2.1.1",
     "@modelcontextprotocol/server": "^2.3.1",
     "@typesafe-ai/sdk": "^0.6.0",

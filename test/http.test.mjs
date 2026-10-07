@@ -40,7 +40,7 @@ async function listTools(url, versionNegotiation) {
   }
 }
 
-test("--http refuses a non-loopback bind without JEV_MCP_AUTH_TOKEN", async () => {
+test("--http refuses a non-loopback bind without DISCERN_MCP_AUTH_TOKEN", async () => {
   const child = spawn(process.execPath, [serverPath, "--http"], {
     env: { PATH: process.env.PATH, TYPESAFE_API_KEY: "test-key", HOST: "0.0.0.0", PORT: "0" },
     stdio: "ignore",
@@ -50,7 +50,7 @@ test("--http refuses a non-loopback bind without JEV_MCP_AUTH_TOKEN", async () =
 });
 
 test("--http serves 2025-era and 2026-07-28 clients statelessly behind a bearer token", async () => {
-  const { url, stop } = await startHttp({ JEV_MCP_AUTH_TOKEN: TOKEN });
+  const { url, stop } = await startHttp({ DISCERN_MCP_AUTH_TOKEN: TOKEN });
   try {
     assert.equal((await fetch(new URL("/health", url))).status, 200);
     const denied = await fetch(url, {
@@ -63,7 +63,7 @@ test("--http serves 2025-era and 2026-07-28 clients statelessly behind a bearer 
     const legacy = await listTools(url);
     assert.equal(legacy.era, "legacy");
     assert.equal(legacy.names.length, 12);
-    assert.ok(legacy.names.includes("jev_verify"));
+    assert.ok(legacy.names.includes("discern_verify"));
 
     const modern = await listTools(url, { mode: { pin: "2026-07-28" } });
     assert.equal(modern.era, "modern");
@@ -125,7 +125,7 @@ test("--http defaults to a loopback bind when HOST is unset", async () => {
 });
 
 test("--http advertises a static tool list and refuses subscriptions/listen without holding a slot", async () => {
-  const { url, stop } = await startHttp({ JEV_MCP_MAX_CONCURRENCY: "1", JEV_MCP_AUTH_TOKEN: TOKEN });
+  const { url, stop } = await startHttp({ DISCERN_MCP_MAX_CONCURRENCY: "1", DISCERN_MCP_AUTH_TOKEN: TOKEN });
   try {
     const client = new Client(
       { name: "listen-test", version: "1.0.0" },
@@ -152,8 +152,8 @@ test("--http advertises a static tool list and refuses subscriptions/listen with
   }
 });
 
-test("--http sheds load with 429 past JEV_MCP_MAX_CONCURRENCY", async () => {
-  const { url, stop } = await startHttp({ JEV_MCP_MAX_CONCURRENCY: "1", JEV_MCP_AUTH_TOKEN: TOKEN });
+test("--http sheds load with 429 past DISCERN_MCP_MAX_CONCURRENCY", async () => {
+  const { url, stop } = await startHttp({ DISCERN_MCP_MAX_CONCURRENCY: "1", DISCERN_MCP_AUTH_TOKEN: TOKEN });
   // Hold the one permitted slot open mid-body: raw socket, headers sent, body withheld.
   const held = connect({ host: url.hostname, port: Number(url.port) });
   await once(held, "connect");
@@ -215,8 +215,8 @@ function rawPost(url, path, headers = {}) {
   });
 }
 
-test("--http ignores /mcp/<token> unless JEV_MCP_PATH_TOKEN=1", async () => {
-  const { url, stop } = await startHttp({ JEV_MCP_AUTH_TOKEN: TOKEN });
+test("--http ignores /mcp/<token> unless DISCERN_MCP_PATH_TOKEN=1", async () => {
+  const { url, stop } = await startHttp({ DISCERN_MCP_AUTH_TOKEN: TOKEN });
   try {
     assert.equal(await rawPost(url, `/mcp/${TOKEN}`), 404);
   } finally {
@@ -224,8 +224,8 @@ test("--http ignores /mcp/<token> unless JEV_MCP_PATH_TOKEN=1", async () => {
   }
 });
 
-test("--http with JEV_MCP_PATH_TOKEN=1 accepts /mcp/<token> and rejects wrong or malformed tokens", async () => {
-  const { url, stop } = await startHttp({ JEV_MCP_AUTH_TOKEN: TOKEN, JEV_MCP_PATH_TOKEN: "1" });
+test("--http with DISCERN_MCP_PATH_TOKEN=1 accepts /mcp/<token> and rejects wrong or malformed tokens", async () => {
+  const { url, stop } = await startHttp({ DISCERN_MCP_AUTH_TOKEN: TOKEN, DISCERN_MCP_PATH_TOKEN: "1" });
   try {
     assert.equal(await rawPost(url, `/mcp/${TOKEN}`), 200);
     assert.equal(await rawPost(url, "/mcp/wrong-token"), 401);
@@ -241,7 +241,7 @@ test("--http with JEV_MCP_PATH_TOKEN=1 accepts /mcp/<token> and rejects wrong or
 });
 
 test("--http path-token credentials take precedence over headers when both are present", async () => {
-  const { url, stop } = await startHttp({ JEV_MCP_AUTH_TOKEN: TOKEN, JEV_MCP_PATH_TOKEN: "1" });
+  const { url, stop } = await startHttp({ DISCERN_MCP_AUTH_TOKEN: TOKEN, DISCERN_MCP_PATH_TOKEN: "1" });
   try {
     // A wrong path token is rejected even with a correct bearer header: the
     // path form is an alternative credential, not a second factor.
@@ -255,9 +255,9 @@ test("--http path-token credentials take precedence over headers when both are p
   }
 });
 
-test("--http refuses JEV_MCP_PATH_TOKEN=1 without JEV_MCP_AUTH_TOKEN", { timeout: 10_000 }, async (t) => {
+test("--http refuses DISCERN_MCP_PATH_TOKEN=1 without DISCERN_MCP_AUTH_TOKEN", { timeout: 10_000 }, async (t) => {
   const child = spawn(process.execPath, [serverPath, "--http"], {
-    env: { PATH: process.env.PATH, TYPESAFE_API_KEY: "test-key", HOST: "127.0.0.1", PORT: "0", JEV_MCP_PATH_TOKEN: "1" },
+    env: { PATH: process.env.PATH, TYPESAFE_API_KEY: "test-key", HOST: "127.0.0.1", PORT: "0", DISCERN_MCP_PATH_TOKEN: "1" },
     stdio: "ignore",
   });
   t.after(() => child.kill("SIGKILL"));

@@ -1,4 +1,4 @@
-// Opt-in stateless Streamable HTTP transport (`jev-mcp --http`).
+// Opt-in stateless Streamable HTTP transport (`discern-mcp --http`).
 //
 // Serves MCP 2026-07-28 per request and 2025-era clients through the SDK's
 // stateless fallback: no sessions, no Mcp-Session-Id, nothing held between
@@ -7,6 +7,7 @@ import { createServer as createNodeServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { createMcpHandler, type McpServer } from "@modelcontextprotocol/server";
+import { discernEnv } from "./env.js";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
@@ -36,29 +37,29 @@ function isLoopbackOrigin(origin: string | undefined): boolean {
   }
 }
 
-export async function serveHttp(factory: () => McpServer, env: NodeJS.ProcessEnv = process.env) {
+export async function serveHttp(factory: () => McpServer, env: Record<string, string | undefined> = discernEnv()) {
   // Loopback by default: binding a public interface is an explicit act.
   const host = env.HOST || "127.0.0.1";
   const port = Number(env.PORT || 8080);
-  const token = Buffer.from(env.JEV_MCP_AUTH_TOKEN ?? "");
-  const maxInFlight = Number(env.JEV_MCP_MAX_CONCURRENCY ?? 16);
+  const token = Buffer.from(env.DISCERN_MCP_AUTH_TOKEN ?? "");
+  const maxInFlight = Number(env.DISCERN_MCP_MAX_CONCURRENCY ?? 16);
   // Opt-in for clients that can only be configured with a URL (claude.ai custom
   // connectors, some cloud agents): the token may also arrive as /mcp/<token>.
-  const pathToken = env.JEV_MCP_PATH_TOKEN === "1";
-  // The server spends the operator's Jev key on every call; never expose it unauthenticated.
+  const pathToken = env.DISCERN_MCP_PATH_TOKEN === "1";
+  // The server spends the operator's provider key on every call; never expose it unauthenticated.
   if (token.length === 0 && !LOOPBACK.has(host)) {
-    throw new Error("JEV_MCP_AUTH_TOKEN is required when HTTP mode binds a non-loopback HOST");
+    throw new Error("DISCERN_MCP_AUTH_TOKEN is required when HTTP mode binds a non-loopback HOST");
   }
   if (pathToken && token.length === 0) {
-    throw new Error("JEV_MCP_PATH_TOKEN requires JEV_MCP_AUTH_TOKEN");
+    throw new Error("DISCERN_MCP_PATH_TOKEN requires DISCERN_MCP_AUTH_TOKEN");
   }
   // The path form compares the segment raw, so a token containing characters
   // a client may percent-encode could never match. Refuse at startup instead.
-  if (pathToken && /[^\w.\-~]/.test(env.JEV_MCP_AUTH_TOKEN ?? "")) {
-    throw new Error("JEV_MCP_PATH_TOKEN requires a URL-safe token (letters, digits, . _ - ~)");
+  if (pathToken && /[^\w.\-~]/.test(env.DISCERN_MCP_AUTH_TOKEN ?? "")) {
+    throw new Error("DISCERN_MCP_PATH_TOKEN requires a URL-safe token (letters, digits, . _ - ~)");
   }
   if (!Number.isInteger(maxInFlight) || maxInFlight < 1) {
-    throw new Error("JEV_MCP_MAX_CONCURRENCY must be a positive integer");
+    throw new Error("DISCERN_MCP_MAX_CONCURRENCY must be a positive integer");
   }
 
   const matches = (candidate: string) => {
@@ -82,10 +83,10 @@ export async function serveHttp(factory: () => McpServer, env: NodeJS.ProcessEnv
       // The tool list never changes: refuse subscriptions/listen in-band
       // instead of letting a client park an idle SSE stream on a slot.
       maxSubscriptions: 0,
-      onerror: (error) => console.error(`[jev-mcp] http: ${error.message}`),
+      onerror: (error) => console.error(`[discern-mcp] http: ${error.message}`),
     }),
     {
-      onerror: (error) => console.error(`[jev-mcp] http: ${error.message}`),
+      onerror: (error) => console.error(`[discern-mcp] http: ${error.message}`),
     },
   );
 
@@ -103,7 +104,7 @@ export async function serveHttp(factory: () => McpServer, env: NodeJS.ProcessEnv
       res.writeHead(401, { "www-authenticate": "Bearer" }).end();
     } else if (inFlight >= maxInFlight) {
       // Backpressure: each in-flight request replays tools and may spend the
-      // operator's Jev key; shed load instead of queueing it.
+      // operator's provider key; shed load instead of queueing it.
       res.writeHead(429, { "retry-after": "1" }).end();
     } else {
       inFlight++;
@@ -114,7 +115,7 @@ export async function serveHttp(factory: () => McpServer, env: NodeJS.ProcessEnv
         .catch((error) => {
           // toNodeHandler reports its own failures through onerror; a promise
           // rejection here must not become an unhandled one that kills Node.
-          console.error(`[jev-mcp] http: ${(error as Error)?.message ?? error}`);
+          console.error(`[discern-mcp] http: ${(error as Error)?.message ?? error}`);
           res.destroy();
         })
         .finally(() => inFlight--);

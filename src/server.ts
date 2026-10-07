@@ -1,22 +1,24 @@
-// jev-mcp server: TypeSafe Jev as MCP judgment tools.
+// discern-mcp server: calibrated judgment tools over MCP, answered by TypeSafe
+// Jev (default) or another configured Decisions provider.
 //
 // Purpose-built tools instead of a raw API passthrough — the question
 // design lives here so every agent thread gets well-formed judgments:
 //
-//   jev_verify   — check claims against evidence (citation-check pattern)
-//   jev_screen   — guardrail fetched/external text before it enters context
-//   jev_noul     — calibrated probability for stated propositions
-//   jev_find     — semantic search over candidates, no embeddings required
-//   jev_classify — batch-assign items to classes from a shared catalog
-//   jev_decide   — bounded multi-candidate decision with requirement checks
-//   jev_rerank   — score every candidate's relevance, return them sorted
-//   jev_compare  — pairwise fact relation, optionally per named aspect
-//   jev_extract  — regex candidates, Jev picks the right verbatim value
-//   jev_audit   — per-value failure-mode battery over extracted values
-//   jev_review   — score a proposed diff before the task is called done
-//   jev_gate     — review a patch and verify completion claims in one call
+//   discern_verify   — check claims against evidence (citation-check pattern)
+//   discern_screen   — guardrail fetched/external text before it enters context
+//   discern_noul     — calibrated probability for stated propositions
+//   discern_find     — semantic search over candidates, no embeddings required
+//   discern_classify — batch-assign items to classes from a shared catalog
+//   discern_decide   — bounded multi-candidate decision with requirement checks
+//   discern_rerank   — score every candidate's relevance, return them sorted
+//   discern_compare  — pairwise fact relation, optionally per named aspect
+//   discern_extract  — regex candidates, the model picks the right verbatim value
+//   discern_audit   — per-value failure-mode battery over extracted values
+//   discern_review   — score a proposed diff before the task is called done
+//   discern_gate     — review a patch and verify completion claims in one call
 
-import { McpServer } from "@modelcontextprotocol/server";
+import { discernEnv } from "./env.js";
+import { McpServer, type ListToolsResult, type StandardSchemaWithJSON, type ToolCallback } from "@modelcontextprotocol/server";
 import { choice, noul, score } from "@typesafe-ai/sdk";
 import { z } from "zod";
 import { createRequire } from "node:module";
@@ -83,38 +85,124 @@ import {
   worstAction,
 } from "./lib.js";
 
-// Resolved from JEV_MCP_MODEL at import time; exported so the CLI entry can
-// report the same model it serves.
-export const MODEL = process.env.JEV_MCP_MODEL ?? "jev-latest";
+// Resolved from DISCERN_MCP_MODEL (or its legacy JEV_MCP_MODEL alias) at import
+// time; exported so the CLI entry can report the same model it serves. `latest`
+// is each carrier's current default model. This read never throws; a
+// conflicting JEV_/DISCERN_ pair is reported by createServer().
+export const MODEL = process.env.DISCERN_MCP_MODEL || process.env.JEV_MCP_MODEL || "latest";
 
 // Resolved at runtime so the MCP handshake version always matches the package.
 const { version: packageVersion } = createRequire(import.meta.url)("../package.json") as { version: string };
 
-// Tools are declared once at module scope and replayed onto a fresh McpServer
-// per stdio connection or per stateless HTTP request (see createServer below).
-type RegisterTool = McpServer["registerTool"];
-const toolRegistrations: Parameters<RegisterTool>[] = [];
-const tools = {
-  registerTool: ((...args: Parameters<RegisterTool>) => {
-    toolRegistrations.push(args);
-  }) as unknown as RegisterTool,
-};
+/**
+ * Which tool-name prefix tools/list advertises. Both prefixes are always
+ * callable during 1.x: `discern` lists discern_* and keeps jev_* as hidden
+ * aliases; `jev` (what the @jkudish/jev-mcp compat bin sets) does the reverse
+ * so existing permission allowlists keep matching. jev_* is removed in 2.0.
+ */
+export type ToolNames = "discern" | "jev";
+const TOOL_PREFIXES: readonly ToolNames[] = ["discern", "jev"];
 
-export function createServer(): McpServer {
+/** Reads DISCERN_TOOL_NAMES (unset or empty means `discern`); any other value is a startup error. */
+export function resolveToolNames(env: Record<string, string | undefined> = discernEnv()): ToolNames {
+  const value = env.DISCERN_TOOL_NAMES || "discern";
+  if (value === "discern" || value === "jev") return value;
+  // Fixed string: the rejected value is never echoed.
+  throw new Error('DISCERN_TOOL_NAMES must be "discern" or "jev".');
+}
+
+// Tools are declared once at module scope, by name suffix, and replayed onto
+// a fresh McpServer per stdio connection or per stateless HTTP request (see
+// createServer below). Each definition is registered once per prefix, and the
+// handler is built for the name it is registered under, so a result's `tool`
+// field always echoes the name that was actually called.
+interface ToolConfig<Input extends StandardSchemaWithJSON> {
+  title: string;
+  /** Written with discern_* cross-references; rewritten per registered prefix. */
+  description: string;
+  inputSchema: Input;
+}
+interface ToolDefinition {
+  suffix: string;
+  config: ToolConfig<StandardSchemaWithJSON>;
+  handler: (tool: string) => ToolCallback<StandardSchemaWithJSON>;
+}
+const toolDefinitions: ToolDefinition[] = [];
+function defineTool<Input extends StandardSchemaWithJSON>(
+  suffix: string,
+  config: ToolConfig<Input>,
+  handler: (tool: string) => ToolCallback<Input>,
+): void {
+  toolDefinitions.push({ suffix, config, handler } as unknown as ToolDefinition);
+}
+
+/**
+ * Hide the other prefix's alias names from tools/list while every registered
+ * name stays callable. Only the alias names are filtered, so tools an embedder
+ * registers on the returned server are listed normally. The SDK has no public
+ * way to hide an enabled tool: RegisteredTool.disable() also rejects calls
+ * ("Tool jev_x disabled"). So this wraps the SDK's own tools/list handler,
+ * read through the Protocol class's protected _getRequestHandler accessor. This
+ * is the only non-public SDK access in the package, and discern-browser uses
+ * the same accessor (verified on @modelcontextprotocol/server 2.3.x). If a
+ * future SDK removes it, the server still starts and lists both names, with
+ * one stderr line, rather than failing every connection.
+ * test/aliases.test.mjs lists and calls aliases through a real client over
+ * stdio and HTTP, so a change that breaks hiding fails CI.
+ */
+let warnedUnhidden = false;
+function hideAliases(server: McpServer, hidden: ReadonlySet<string>): void {
+  type ListHandler = (request: unknown, ctx: unknown) => Promise<ListToolsResult>;
+  const original = (server.server as unknown as { _getRequestHandler?(method: string): ListHandler | undefined })._getRequestHandler?.("tools/list");
+  if (typeof original !== "function") {
+    if (!warnedUnhidden) {
+      warnedUnhidden = true;
+      process.stderr.write("[discern-mcp] this MCP SDK version cannot hide tool aliases; listing both discern_* and jev_* names.\n");
+    }
+    return;
+  }
+  server.server.removeRequestHandler("tools/list");
+  server.server.setRequestHandler("tools/list", async (request, ctx) => {
+    const result = await original(request, ctx);
+    return { ...result, tools: result.tools.filter((tool) => !hidden.has(tool.name)) };
+  });
+}
+
+export interface CreateServerOptions {
+  /** Tool-name prefix to advertise. Defaults to DISCERN_TOOL_NAMES (see resolveToolNames). */
+  toolNames?: ToolNames;
+}
+
+export function createServer(options: CreateServerOptions = {}): McpServer {
+  // Reading the normalized environment surfaces a JEV_/DISCERN_ conflict here,
+  // when the server is built, not at import.
+  const env = discernEnv();
+  const listed = options.toolNames ?? resolveToolNames(env);
+  // The option is typed, but JavaScript callers can pass anything; never build
+  // a server that silently lists no tools.
+  if (!TOOL_PREFIXES.includes(listed)) throw new Error('createServer: toolNames must be "discern" or "jev".');
   // The tool list is static (no change notifications are ever emitted), so it
   // advertises no listChanged capability and no client has a reason to hold a
   // subscriptions/listen stream open, which would occupy an HTTP slot idle.
   const server = new McpServer(
-    { name: "jev-mcp", version: packageVersion },
+    { name: "discern-mcp", version: packageVersion },
     { capabilities: { tools: { listChanged: false } } },
   );
-  for (const args of toolRegistrations) (server.registerTool as (...a: Parameters<RegisterTool>) => unknown)(...args);
+  for (const { suffix, config, handler } of toolDefinitions) {
+    for (const prefix of TOOL_PREFIXES) {
+      const name = `${prefix}_${suffix}`;
+      const description = config.description.replace(/\bdiscern_(?=[a-z])/g, `${prefix}_`);
+      server.registerTool(name, { ...config, description }, handler(name));
+    }
+  }
+  const other = listed === "discern" ? "jev" : "discern";
+  hideAliases(server, new Set(toolDefinitions.map(({ suffix }) => `${other}_${suffix}`)));
   return server;
 }
 
-import { askJev as askProvider } from "./provider.js";
+import { askDiscern as askProvider } from "./provider.js";
 
-async function askJev(state: unknown, questions: Record<string, unknown>, signal?: AbortSignal) {
+async function askDiscern(state: unknown, questions: Record<string, unknown>, signal?: AbortSignal) {
   const result = await askProvider(state, questions, MODEL, signal);
   // The typesafe SDK transport returns unchecked `answers: any`; a null or
   // non-object envelope must not crash tools that index it. Normalize once
@@ -165,14 +253,14 @@ const candidatesSchema = z
   .describe(`Candidates to search. Up to ${MAX_CANDIDATES} in one call; texts are truncated at ${MAX_CANDIDATE_CHARS} chars.`);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_verify
+// discern_verify
 // ─────────────────────────────────────────────────────────────────────────────
-tools.registerTool(
-  "jev_verify",
+defineTool(
+  "verify",
   {
     title: "Verify claims against evidence",
     description:
-      "Check each claim against provided evidence text with TypeSafe Jev. Returns per claim: " +
+      "Check each claim against provided evidence text. Returns per claim: " +
       "verdict (verified | contradicted | unsupported), full probability distribution, confidence, " +
       "and whether the verdict stands on its own (auto) or needs human review. " +
       "Pattern: docs.typesafe.ai/cookbooks/citation_check. Pass reports, PR descriptions, or agent briefs as claims " +
@@ -191,7 +279,7 @@ tools.registerTool(
       ),
     }),
   },
-  async ({ claims, evidence: rawEvidence, auto_accept, subject_at }, ctx) => {
+  (tool) => async ({ claims, evidence: rawEvidence, auto_accept, subject_at }, ctx) => {
     const autoAccept = auto_accept ?? 0.8;
     const subjectAt = subject_at ?? DEFAULT_SUBJECT_AT;
     const evidenceItems =
@@ -244,7 +332,7 @@ tools.registerTool(
       evidence,
     };
 
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     const results = claimItems.map((claim) => {
       const relation = answers[`relation_${claim.id}`];
@@ -292,7 +380,7 @@ tools.registerTool(
     });
 
     return text({
-      tool: "jev_verify",
+      tool,
       model: model,
       provider,
       auto_accept: autoAccept,
@@ -310,14 +398,14 @@ tools.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_screen
+// discern_screen
 // ─────────────────────────────────────────────────────────────────────────────
-tools.registerTool(
-  "jev_screen",
+defineTool(
+  "screen",
   {
     title: "Screen content before it enters agent context",
     description:
-      "Judge fetched or external text with TypeSafe Jev before an agent reads it: probability it contains " +
+      "Judge fetched or external text before an agent reads it: probability it contains " +
       "instructions aimed at an AI agent (prompt injection), whether it has substantive content, and (when a purpose " +
       "is given) whether it is relevant to the task. Returns a recommendation: pass | review | block | skip. " +
       "Pattern: docs.typesafe.ai/cookbooks/llm_guardrails.",
@@ -331,7 +419,7 @@ tools.registerTool(
       review_at: z.number().min(0).max(1).optional().describe("Injection probability at or above which content is flagged for review. Default 0.25."),
     }),
   },
-  async ({ text: content, purpose, block_at, review_at }, ctx) => {
+  (tool) => async ({ text: content, purpose, block_at, review_at }, ctx) => {
     const blockAt = block_at ?? 0.75;
     const reviewAt = review_at ?? 0.25;
 
@@ -356,7 +444,7 @@ tools.registerTool(
     }
 
     const state = { content, purpose: purpose ?? null };
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     const injection = validateNoulAnswer(answers.injection);
     const substance = validateNoulAnswer(answers.substance);
@@ -365,7 +453,7 @@ tools.registerTool(
       // A screening tool must fail closed: a missing or malformed answer must
       // not be treated as a clean bill of health (injection ?? 0 would pass).
       return text({
-        tool: "jev_screen",
+        tool,
         model: model,
         provider,
         status: "invalid_response",
@@ -379,7 +467,7 @@ tools.registerTool(
     const recommendation = screenRecommendation({ injection, relevance: relevance ?? undefined, substance, blockAt, reviewAt });
 
     return text({
-      tool: "jev_screen",
+      tool,
       model: model,
       provider,
       probabilities: { injection, substance, relevance: relevance ?? null },
@@ -391,17 +479,17 @@ tools.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_noul
+// discern_noul
 // ─────────────────────────────────────────────────────────────────────────────
-tools.registerTool(
-  "jev_noul",
+defineTool(
+  "noul",
   {
     title: "Calibrated probability for propositions",
     description:
-      "Return a calibrated probability for each stated proposition with TypeSafe Jev, in one batched request: " +
+      "Return a calibrated probability for each stated proposition, in one batched request: " +
       "high means likely, low means unlikely, middling means genuinely uncertain. Supplied context informs the " +
       "judgment but is not a proof guarantee; to test claims strictly against evidence, including whether the " +
-      "evidence is merely silent, use jev_verify instead.",
+      "evidence is merely silent, use discern_verify instead.",
     inputSchema: strictShape({
       propositions: z
         .array(z.string().min(1).max(MAX_PROPOSITION_CHARS))
@@ -426,7 +514,7 @@ tools.registerTool(
         ),
     }),
   },
-  async ({ propositions, context: rawContext, auto_accept }, ctx) => {
+  (tool) => async ({ propositions, context: rawContext, auto_accept }, ctx) => {
     const autoAccept = auto_accept ?? 0.85;
 
     const contextItems =
@@ -448,7 +536,7 @@ tools.registerTool(
 
     // One Noul per proposition. The framing is about the proposition itself,
     // so a low probability means likely-not-true, not merely unevidenced;
-    // evidence-relation judgments (including silence) belong to jev_verify.
+    // evidence-relation judgments (including silence) belong to discern_verify.
     const questions: Record<string, unknown> = {};
     for (const p of items) {
       questions[`p_${p.id}`] = noul(`proposition \`${p.id}\`: ${p.text}`, {
@@ -458,7 +546,7 @@ tools.registerTool(
     }
 
     const state = { propositions: items, context: contextItems.length ? contextItems : null };
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     const rows = items.map((p) => ({
       id: p.id,
@@ -469,7 +557,7 @@ tools.registerTool(
       // Fail closed: a missing or malformed probability must never surface as
       // a label or an auto classification, and no `auto: true` may appear.
       return text({
-        tool: "jev_noul",
+        tool,
         model,
         provider,
         status: "invalid_response",
@@ -487,7 +575,7 @@ tools.registerTool(
       return { ...r, label, auto: label !== "uncertain" };
     });
     return text({
-      tool: "jev_noul",
+      tool,
       model,
       provider,
       status: "ok",
@@ -499,14 +587,14 @@ tools.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_find
+// discern_find
 // ─────────────────────────────────────────────────────────────────────────────
-tools.registerTool(
-  "jev_find",
+defineTool(
+  "find",
   {
     title: "Semantic search over candidates",
     description:
-      "Rank candidates against a plain-language query with TypeSafe Jev — no embeddings needed. " +
+      "Rank candidates against a plain-language query — no embeddings needed. " +
       "One Choice scores every candidate id by how well it answers the query, plus a Noul checks whether " +
       "any candidate addresses the query at all (so a confident 'top hit' cannot masquerade as an answer). " +
       "Pattern: docs.typesafe.ai/cookbooks/semantic_find. Use for 'which file/note/line covers X' across up to " +
@@ -517,7 +605,7 @@ tools.registerTool(
       top_k: z.number().int().min(1).max(50).optional().describe("How many ranked candidates to return. Default 5."),
     }),
   },
-  async ({ query, candidates: rawCandidates, top_k }, ctx) => {
+  (tool) => async ({ query, candidates: rawCandidates, top_k }, ctx) => {
     const topK = top_k ?? 5;
     const { items: candidates } = ensureUniqueIds(
       rawCandidates.map((c) => ({ id: c.id ?? "", text: truncate(c.text, MAX_CANDIDATE_CHARS) })),
@@ -534,7 +622,7 @@ tools.registerTool(
     };
 
     const state = { query, candidates };
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     const exists = validateNoulAnswer(answers.exists);
     const best = validateChoiceAnswer(answers.best, candidates.map((c) => c.id));
@@ -542,7 +630,7 @@ tools.registerTool(
       // A missing exists/best answer must not be read as "no match" (exists ?? 0)
       // or "no ranking": surface the protocol failure instead.
       return text({
-        tool: "jev_find",
+        tool,
         model: model,
         provider,
         query,
@@ -557,7 +645,7 @@ tools.registerTool(
     const ranked = rankCandidates(candidates, best.probabilities).slice(0, topK);
 
     return text({
-      tool: "jev_find",
+      tool,
       model: model,
       provider,
       query,
@@ -571,14 +659,14 @@ tools.registerTool(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_classify
+// discern_classify
 // ─────────────────────────────────────────────────────────────────────────────
-tools.registerTool(
-  "jev_classify",
+defineTool(
+  "classify",
   {
     title: "Classify items against a shared label set",
     description:
-      "Assign each item to one class from a shared catalog with TypeSafe Jev, in one batched request: " +
+      "Assign each item to one class from a shared catalog, in one batched request: " +
       "the class catalog is sent once and every item becomes an independent Choice question. " +
       "Returns per item: the chosen class, the full distribution, confidence, winner-to-runner-up margin, " +
       "and an auto-versus-review decision. Auto requires both a high top probability (default 0.85) and a " +
@@ -607,7 +695,7 @@ tools.registerTool(
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
     }),
   },
-  async ({ items: rawItems, classes: rawClasses, purpose, context, auto_accept, minimum_margin }, ctx) => {
+  (tool) => async ({ items: rawItems, classes: rawClasses, purpose, context, auto_accept, minimum_margin }, ctx) => {
     const autoAccept = auto_accept ?? 0.85;
     const minMargin = minimum_margin ?? 0.5;
 
@@ -616,7 +704,7 @@ tools.registerTool(
     // reject duplicate supplied IDs rather than silently suffixing them.
     // Generated fallbacks (item0/class0 style) avoid every supplied or
     // already-used ID, so an omitted id can never collide with an explicit
-    // one — the same two-phase pattern jev_rerank uses for candidate IDs.
+    // one — the same two-phase pattern discern_rerank uses for candidate IDs.
     const suppliedItemIds = new Set<string>();
     for (const it of rawItems) {
       if (it.id != null) {
@@ -681,7 +769,7 @@ tools.registerTool(
       );
     }
 
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     const keyToExternal = new Map(classes.map((c) => [c.key, c.external]));
     const results = items.map((item) => {
@@ -725,7 +813,7 @@ tools.registerTool(
     }
 
     return text({
-      tool: "jev_classify",
+      tool,
       model: model,
       provider,
       summary: {
@@ -744,16 +832,16 @@ tools.registerTool(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_decide
+// discern_decide
 // ─────────────────────────────────────────────────────────────────────────────
-tools.registerTool(
-  "jev_decide",
+defineTool(
+  "decide",
   {
     title: "Decide between bounded alternatives",
     description:
       "One unresolved, bounded decision where semantic judgment over supplied evidence could change your plan: " +
       "implementation alternatives, product tradeoffs with known preferences, workflow selection. " +
-      "Supply 2-6 candidates, evidence, and explicit priorities. Jev returns a Choice distribution over the candidates " +
+      "Supply 2-6 candidates, evidence, and explicit priorities. The model returns a Choice distribution over the candidates " +
       "plus escape hatches (ask_user / investigate / none), and a per-candidate per-requirement " +
       "supported / contradicted / unknown judgment for each optional requirement, all in one request. " +
       "One call per unchanged decision; do not repeat a call to obtain a more pleasing answer. " +
@@ -782,12 +870,12 @@ tools.registerTool(
         .optional()
         .describe(
           "When true, a recommendation whose own requirement checks came back contradicted returns " +
-            "selected: null with status \"escalate\" instead of the candidate id (the jev_verify vocabulary). " +
+            "selected: null with status \"escalate\" instead of the candidate id (the same vocabulary as the verify tool). " +
             "Default false keeps the recommendation and warns.",
         ),
     }),
   },
-  async ({ decision, evidence, priorities, candidates, requirements: reqs, escape_hatches, escalate_on_contradiction }, ctx) => {
+  (tool) => async ({ decision, evidence, priorities, candidates, requirements: reqs, escape_hatches, escalate_on_contradiction }, ctx) => {
     const includeHatches = escape_hatches ?? true;
     const requirements = reqs ?? [];
 
@@ -839,7 +927,7 @@ tools.registerTool(
       candidates: candidateKeys.map((c) => ({ id: c.key, description: c.description })),
       requirements,
     };
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     const keyToId = new Map(candidateKeys.map((c) => [c.key, c.id]));
     const expectedRecKeys = new Set([...candidateKeys.map((c) => c.key), ...(includeHatches ? Object.keys(DECIDE_ESCAPE_HATCHES) : [])]);
@@ -869,7 +957,7 @@ tools.registerTool(
     const escalating = Boolean(escalate_on_contradiction) && contradicted.length > 0;
 
     return text({
-      tool: "jev_decide",
+      tool,
       model: model,
       provider,
       recommendation: rec
@@ -898,15 +986,15 @@ tools.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_rerank
+// discern_rerank
 // ─────────────────────────────────────────────────────────────────────────────
-tools.registerTool(
-  "jev_rerank",
+defineTool(
+  "rerank",
   {
     title: "Score every candidate's relevance and return them sorted",
     description:
-      "Rerank candidates against a query with TypeSafe Jev: one independent relevance probability per candidate, " +
-      "all in a single request, then sorted by score. Unlike jev_find (which picks one best answer), rerank scores " +
+      "Rerank candidates against a query: one independent relevance probability per candidate, " +
+      "all in a single request, then sorted by score. Unlike discern_find (which picks one best answer), rerank scores " +
       "every candidate so the full ordering survives. TypeSafe's rerank cookbook reports that on the CLERC benchmark " +
       "this pattern lifted top-1 from 5% to 18% and top-10 from 38% to 62% (docs.typesafe.ai/cookbooks). " +
       `Use for retrieval ordering, dedup triage, or feed ranking across up to ${MAX_RERANK_CANDIDATES} candidates.`,
@@ -916,7 +1004,7 @@ tools.registerTool(
       top_k: z.number().int().min(1).max(250).optional().describe("How many ranked candidates to return. Default: all."),
     }),
   },
-  async ({ query, candidates: rawCandidates, top_k }, ctx) => {
+  (tool) => async ({ query, candidates: rawCandidates, top_k }, ctx) => {
     const topK = top_k ?? null;
 
     // Caller IDs are preserved verbatim; opaque wire keys (classify pattern).
@@ -961,7 +1049,7 @@ tools.registerTool(
       });
     });
 
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     // One invalid Noul makes the whole ordering untrustworthy; never sort a
     // missing answer as a confident zero.
@@ -971,7 +1059,7 @@ tools.registerTool(
     });
     if (scores.some((s) => Number.isNaN(s))) {
       return text({
-        tool: "jev_rerank",
+        tool,
         model: model,
         provider,
         query,
@@ -988,7 +1076,7 @@ tools.registerTool(
     const returned = topK ? ranked.slice(0, topK) : ranked;
 
     return text({
-      tool: "jev_rerank",
+      tool,
       model: model,
       provider,
       query,
@@ -1008,14 +1096,14 @@ tools.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_compare
+// discern_compare
 // ─────────────────────────────────────────────────────────────────────────────
-tools.registerTool(
-  "jev_compare",
+defineTool(
+  "compare",
   {
     title: "Compare two passages for factual agreement",
     description:
-      "Judge the relation between two passages with TypeSafe Jev: same_fact, contradicts, or different_facts, " +
+      "Judge the relation between two passages: same_fact, contradicts, or different_facts, " +
       "with the full probability distribution, confidence, and an auto-versus-review decision. " +
       "Optionally supply aspects (price, date, method, …) and each gets an independent per-aspect judgment " +
       "in the same single request. Use for source reconciliation, changelog-vs-code drift, or merge sanity checks. " +
@@ -1033,7 +1121,7 @@ tools.registerTool(
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
     }),
   },
-  async ({ passage_a, passage_b, aspects: rawAspects, purpose, auto_accept, minimum_margin }, ctx) => {
+  (tool) => async ({ passage_a, passage_b, aspects: rawAspects, purpose, auto_accept, minimum_margin }, ctx) => {
     const autoAccept = auto_accept ?? 0.85;
     const minMargin = minimum_margin ?? 0.5;
     const aspects = rawAspects ?? [];
@@ -1058,7 +1146,7 @@ tools.registerTool(
     });
 
     const state = { purpose: purpose ?? null, passage_a: a, passage_b: b, aspects };
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     const expected = new Set(Object.keys(COMPARE_RELATIONS));
 
@@ -1090,7 +1178,7 @@ tools.registerTool(
     const aspectResults = aspects.map((aspect, i) => ({ aspect, ...shape(answers[`aspect_${i}`]) }));
 
     return text({
-      tool: "jev_compare",
+      tool,
       model: model,
       provider,
       overall,
@@ -1102,19 +1190,19 @@ tools.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_extract
+// discern_extract
 // ─────────────────────────────────────────────────────────────────────────────
 import { Worker } from "node:worker_threads";
 
 // Caller-supplied regex runs in a throwaway worker with a hard deadline, so a
 // catastrophic backtracking pattern can never hang the MCP server itself.
-tools.registerTool(
-  "jev_extract",
+defineTool(
+  "extract",
   {
-    title: "Extract fields by regex, Jev picks the right match",
+    title: "Extract fields by regex, the model picks the right match",
     description:
-      "Extract structured fields from a document with TypeSafe Jev as the picker, not the generator: your regex " +
-      "finds candidate substrings in code, Jev chooses which candidate is the field's true value, and the result is " +
+      "Extract structured fields from a document with the model as the picker, not the generator: your regex " +
+      "finds candidate substrings in code, the model chooses which candidate is the field's true value, and the result is " +
       "returned verbatim — never model-generated text. Fields with zero regex matches never reach the model " +
       "(not_found); if no field has matches, no API call is made. Ambiguous picks are flagged for review. Use for prices, dates, version numbers, " +
       "IDs, and anything with a recognizable shape; keep documents bounded.",
@@ -1126,7 +1214,7 @@ tools.registerTool(
             id: z.string().regex(/^[a-z][a-z0-9_-]*$/).max(64).describe("Field name, e.g. 'price' or 'version'."),
             pattern: z.string().min(1).max(500).describe("JavaScript regex source (without delimiters) that matches candidate values. Runs in a sandboxed worker with a hard timeout."),
             flags: z.string().max(8).optional().describe("Regex flags (e.g. 'i'). 'g' is always added; non-letters are dropped."),
-            description: z.string().min(1).max(2000).describe("What the field is, so Jev can pick the right candidate among regex matches."),
+            description: z.string().min(1).max(2000).describe("What the field is, so the model can pick the right candidate among regex matches."),
           }).strict(),
         )
         .min(1)
@@ -1137,7 +1225,7 @@ tools.registerTool(
       minimum_margin: z.number().min(0).max(1).optional().describe("Minimum winner-to-runner-up gap for auto. Default 0.5."),
     }),
   },
-  async ({ document, fields: rawFields, purpose, auto_accept, minimum_margin }, ctx) => {
+  (tool) => async ({ document, fields: rawFields, purpose, auto_accept, minimum_margin }, ctx) => {
     const autoAccept = auto_accept ?? 0.85;
     const minMargin = minimum_margin ?? 0.5;
     const doc = truncate(document, 50000);
@@ -1148,7 +1236,7 @@ tools.registerTool(
       seenFieldIds.add(f.id);
     }
 
-    // Regex runs in an isolated worker; Jev only picks among the matches.
+    // Regex runs in an isolated worker; the model only picks among the matches.
     // Zero-length matches are dropped and overlong matches are skipped before
     // the cap is applied, so eligible matches are never crowded out by
     // ineligible ones, and candidate identity on the wire always equals the
@@ -1199,7 +1287,7 @@ tools.registerTool(
     }
 
     const { answers, usage, provider, model } =
-      stateFields.length > 0 ? await askJev({ purpose: purpose ?? null, document: doc, fields: stateFields }, questions, ctx.mcpReq.signal) : { answers: {} as Record<string, any>, usage: null, provider: "none" as const, model: MODEL };
+      stateFields.length > 0 ? await askDiscern({ purpose: purpose ?? null, document: doc, fields: stateFields }, questions, ctx.mcpReq.signal) : { answers: {} as Record<string, any>, usage: null, provider: "none" as const, model: MODEL };
 
     const results = fields.map((f) => {
       const flags = { candidates_truncated: f.truncated, matches_skipped_too_long: f.tooLong };
@@ -1267,7 +1355,7 @@ tools.registerTool(
     });
 
     return text({
-      tool: "jev_extract",
+      tool,
       model: model,
       provider,
       summary: {
@@ -1286,7 +1374,7 @@ tools.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_audit
+// discern_audit
 // Question design adapted from the TypeSafe SDE cascade cookbook
 // (docs.typesafe.ai/cookbooks/sde_cascade).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1326,8 +1414,8 @@ const AUDIT_ABSENCE = {
   no: "returning nothing is correct",
 };
 
-tools.registerTool(
-  "jev_audit",
+defineTool(
+  "audit",
   {
     title: "Audit extracted values against their source text",
     description:
@@ -1335,7 +1423,7 @@ tools.registerTool(
       "per-value failure-mode battery (hallucinated / off-target / incomplete / wrong format, each framed so true = something " +
       "is wrong) plus a dedicated omission check for empty values. Any value's P(wrong) at wrong_at escalates the whole audit; " +
       "max-gated, never averaged. For multimodal intake: run your vision or ASR model first to produce a dense transcript of the " +
-      "image, scan, or recording, screen that transcript with jev_screen, then audit the extracted values against it here — the " +
+      "image, scan, or recording, screen that transcript with discern_screen, then audit the extracted values against it here — the " +
       "tool never sees pixels or audio, it audits two text artifacts against each other. Schema validation catches structural " +
       "errors; it can flag a schema-valid fabrication against the supplied source text — "
       + "a limited cross-check, not verification of the original.",
@@ -1375,7 +1463,7 @@ tools.registerTool(
         .describe("A record's P(wrong) at or above this flags the value and escalates. Default 0.7."),
     }),
   },
-  async ({ source, records, wrong_at: wrongAtRaw }, ctx) => {
+  (tool) => async ({ source, records, wrong_at: wrongAtRaw }, ctx) => {
     const wrongAt = wrongAtRaw ?? 0.7;
 
     // Reject duplicate ids so wire-key mapping can never alias results.
@@ -1412,7 +1500,7 @@ tools.registerTool(
       }
     });
 
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     const results = records.map((record, i) => {
       const checks: Record<string, number> = {};
@@ -1447,7 +1535,7 @@ tools.registerTool(
     const action = invalidCount > 0 || flagged > 0 ? "escalate" : truncated ? "review" : "pass";
 
     return text({
-      tool: "jev_audit",
+      tool,
       model,
       provider,
       action,
@@ -1461,7 +1549,7 @@ tools.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// jev_review / jev_gate
+// discern_review / discern_gate
 // Question design adapted from burnigtm/jev-mcp (MIT) via PR #2 by rimusz.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1730,19 +1818,19 @@ function projectReviewHalf(
   return { ...base, action, composite, reason_codes: reasonCodes, limiting_rubrics: limitingRubrics };
 }
 
-tools.registerTool(
-  "jev_review",
+defineTool(
+  "review",
   {
     title: "Review a proposed patch",
     description:
-      "Score a proposed diff against the request with TypeSafe Jev before the task is called done. " +
+      "Score a proposed diff against the request before the task is called done. " +
       "Returns 0..2 rubric scores for correctness, spec match, test gap, and blast radius (the last two lower the " +
       "weighted composite), a safe_to_apply probability, and an auto | review | escalate action. Auto requires " +
       "safe_to_apply and min score confidence at auto_accept and the composite at composite_floor; truncated or " +
       "malformed input never returns auto. Does not apply the patch or run tests. " +
       "For a multi-file change, pass files instead of diff: the rubric is asked once per file in the same request " +
       "and the action composes in code (auto only when every file is auto). " +
-      "Use jev_gate to also verify completion claims against evidence in the same call.",
+      "Use discern_gate to also verify completion claims against evidence in the same call.",
     inputSchema: strictShape({
       request: z.string().min(1).describe("What the user asked for; this frames the review, it is not proof of anything."),
       diff: z
@@ -1784,13 +1872,13 @@ tools.registerTool(
         .describe("Weighted composite at or above this is required for auto. Default 0.7."),
     }),
   },
-  async ({ request, diff, files, tests, auto_accept, review_at, composite_floor }, ctx) => {
+  (tool) => async ({ request, diff, files, tests, auto_accept, review_at, composite_floor }, ctx) => {
     const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept ?? 0.8, review_at);
     const compositeFloor = composite_floor ?? DEFAULT_COMPOSITE_FLOOR;
     if (Boolean(diff) === Boolean(files)) {
       return {
         ...text({
-          tool: "jev_review",
+          tool,
           error: "provide exactly one of diff (whole-change review) or files (per-file review).",
         }),
         isError: true,
@@ -1807,7 +1895,7 @@ tools.registerTool(
       if (stateChars > MAX_REVIEW_FILES_TOTAL_CHARS) {
         return {
           ...text({
-            tool: "jev_review",
+            tool,
             error: `request, tests, and files together exceed the ${MAX_REVIEW_FILES_TOTAL_CHARS.toLocaleString("en-US")}-character combined budget; split the review or trim the inputs.`,
           }),
           isError: true,
@@ -1845,7 +1933,7 @@ tools.registerTool(
     } else {
       Object.assign(questions, reviewQuestions());
     }
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     if (perFile) {
       const fileResults = perFile.map((file, i) => ({
@@ -1857,7 +1945,7 @@ tools.registerTool(
         ),
       }));
       return text({
-        tool: "jev_review",
+        tool,
         model,
         provider,
         truncated,
@@ -1869,7 +1957,7 @@ tools.registerTool(
     }
 
     return text({
-      tool: "jev_review",
+      tool,
       model,
       provider,
       truncated,
@@ -1879,17 +1967,17 @@ tools.registerTool(
   },
 );
 
-tools.registerTool(
-  "jev_gate",
+defineTool(
+  "gate",
   {
     title: "Gate completion: review a patch and verify claims",
     description:
-      "Review a proposed patch and verify completion claims against supplied evidence in one TypeSafe Jev call. " +
+      "Review a proposed patch and verify completion claims against supplied evidence in one call. " +
       "Auto only when the patch review is accepted and every claim is verified at or above auto_accept. " +
       "Unsupported claims require review; confident contradictions, unknown confidence, or low confidence escalate. " +
       "The request and claims are assertions to check, never proof; put supporting diff excerpts and test logs in " +
       "evidence. Evidence is capped at 16 items and 200,000 characters in aggregate. " +
-      "Does not run tests or apply changes. Use jev_review for a patch without claims, jev_verify for " +
+      "Does not run tests or apply changes. Use discern_review for a patch without claims, discern_verify for " +
       "claims without a patch review.",
     inputSchema: strictShape({
       request: z.string().min(1).describe("What the user asked for; this is not evidence of completion."),
@@ -1917,7 +2005,7 @@ tools.registerTool(
         .max(MAX_GATE_CLAIMS)
         .describe(`Completion claims to check against evidence, each truncated at ${MAX_CLAIM_CHARS} chars. Up to ${MAX_GATE_CLAIMS} per call.`),
       evidence: evidenceSchema.refine((value) => hasNonEmptyEvidence(normalizeEvidence(value as never)), {
-        message: "jev_gate requires at least one evidence item with non-empty text.",
+        message: "The gate requires at least one evidence item with non-empty text.",
       }),
       tests: z.string().optional().describe("Reported test output for the patch review. Truncated at the same cap."),
       auto_accept: z
@@ -1940,7 +2028,7 @@ tools.registerTool(
         .describe("Weighted composite at or above this is required for auto. Default 0.7."),
     }),
   },
-  async ({ request, diff, files, claims, evidence: rawEvidence, tests, auto_accept, review_at, composite_floor }, ctx) => {
+  (tool) => async ({ request, diff, files, claims, evidence: rawEvidence, tests, auto_accept, review_at, composite_floor }, ctx) => {
     const { autoAccept, reviewAt } = resolvePolicyThresholds(auto_accept ?? 0.8, review_at);
     const compositeFloor = composite_floor ?? DEFAULT_COMPOSITE_FLOOR;
     const evidence = normalizeEvidence(rawEvidence as never);
@@ -1948,7 +2036,7 @@ tools.registerTool(
     if (Boolean(diff) === Boolean(files)) {
       return {
         ...text({
-          tool: "jev_gate",
+          tool,
           error: "provide exactly one of diff (whole-change review) or files (per-file review).",
         }),
         isError: true,
@@ -1960,7 +2048,7 @@ tools.registerTool(
     if (evidence.length > MAX_GATE_EVIDENCE_ITEMS) {
       return {
         ...text({
-          tool: "jev_gate",
+          tool,
           error: `evidence exceeds ${MAX_GATE_EVIDENCE_ITEMS} items; split the gate or trim the evidence.`,
         }),
         isError: true,
@@ -1970,14 +2058,14 @@ tools.registerTool(
     if (evidenceChars > MAX_GATE_EVIDENCE_CHARS) {
       return {
         ...text({
-          tool: "jev_gate",
+          tool,
           error: `evidence exceeds the ${MAX_GATE_EVIDENCE_CHARS.toLocaleString("en-US")}-character aggregate budget; split the gate or trim the evidence.`,
         }),
         isError: true,
       };
     }
     if (perFile) {
-      // Same combined-state budget as jev_review: request + tests + every file
+      // Same combined-state budget as discern_review: request + tests + every file
       // diff together (evidence has its own budget above).
       const stateChars =
         request.length +
@@ -1986,7 +2074,7 @@ tools.registerTool(
       if (stateChars > MAX_REVIEW_FILES_TOTAL_CHARS) {
         return {
           ...text({
-            tool: "jev_gate",
+            tool,
             error: `request, tests, and files together exceed the ${MAX_REVIEW_FILES_TOTAL_CHARS.toLocaleString("en-US")}-character combined budget; split the gate or trim the inputs.`,
           }),
           isError: true,
@@ -1994,7 +2082,7 @@ tools.registerTool(
       }
     }
 
-    // Per-file context mirrors jev_review; the gate-wide flag additionally
+    // Per-file context mirrors discern_review; the gate-wide flag additionally
     // keeps claims/evidence truncation fail-closed for claim actions.
     const contextTruncated =
       request.length > MAX_REVIEW_DOC_CHARS || (tests?.length ?? 0) > MAX_REVIEW_DOC_CHARS;
@@ -2041,7 +2129,7 @@ tools.registerTool(
       );
     });
 
-    const { answers, usage, provider, model } = await askJev(state, questions, ctx.mcpReq.signal);
+    const { answers, usage, provider, model } = await askDiscern(state, questions, ctx.mcpReq.signal);
 
     const review = perFile
       ? (() => {
@@ -2112,7 +2200,7 @@ tools.registerTool(
     if (action === "auto") reasonCodes.push("accepted");
 
     return text({
-      tool: "jev_gate",
+      tool,
       model,
       provider,
       truncated,
@@ -2126,8 +2214,9 @@ tools.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Boot lives in index.ts (the `jev-mcp` bin and the package root import).
-// This module is deliberately side-effect-free beyond tool registration:
+// Boot lives in index.ts (the `discern-mcp` bin, also exported as `./bin`).
+// This module is deliberately side-effect-free beyond tool registration and
+// the JEV_* env aliases (env.ts):
 // importing it never starts a transport. Embedders use it directly via
-// `@jkudish/jev-mcp/server`.
+// `@jkudish/discern-mcp/server`.
 // ─────────────────────────────────────────────────────────────────────────────

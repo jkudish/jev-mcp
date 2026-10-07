@@ -1,0 +1,37 @@
+{
+  "name": "@jkudish/jev-mcp",
+  "version": "1.0.0",
+  "description": "Compatibility package: jev-mcp was renamed to @jkudish/discern-mcp. Runs discern-mcp with the jev_* tool names listed, so existing configs and permission allowlists keep working.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Joey Kudish",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jkudish/discern-mcp.git",
+    "directory": "compat/jev-mcp"
+  },
+  "bin": {
+    "jev-mcp": "bin/jev-mcp.js"
+  },
+  "exports": {
+    ".": "./server.js",
+    "./server": "./server.js"
+  },
+  "types": "./server.d.ts",
+  "files": [
+    "bin",
+    "server.js",
+    "server.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@jkudish/discern-mcp": "^1.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

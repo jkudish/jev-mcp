@@ -3,23 +3,27 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { normalizeDiscernEnv } from "@jkudish/discern-agent-tools";
 
 export const DEFAULT_BLOCK_THRESHOLD = 0.85;
 export const DEFAULT_TIMEOUT_MS = 15_000;
-// The jev_decide evidence bound is 12,000 characters; stay well under it so the
+// The discern_decide evidence bound is 12,000 characters; stay well under it so the
 // policy and framing always fit and the judgment stays fast.
 export const MAX_TOOL_INPUT_CHARS = 4_000;
 export const MAX_POLICY_CHARS = 2_000;
 export const MAX_STDIN_BYTES = 32_768;
 export const MAX_EVIDENCE_CHARS = 6_000;
 
-// Only the Jev settings the server subprocess needs are forwarded; the policy
-// file's contents and every other hook environment variable are not.
+// Only the provider settings the server subprocess needs are forwarded; the
+// policy file's contents and every other hook environment variable are not.
+// Legacy JEV_* names are read through normalizeDiscernEnv and forwarded under
+// their DISCERN_* names.
 export const FORWARDED_ENV_KEYS = [
-  "JEV_PROVIDER", "JEV_MCP_MODEL",
+  "DISCERN_PROVIDER", "DISCERN_MCP_MODEL",
   "TYPESAFE_API_KEY", "TYPESAFE_BASE_URL",
   "OPENROUTER_API_KEY", "AI_GATEWAY_API_KEY",
-  "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "JEV_CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "DISCERN_CLOUDFLARE_API_TOKEN",
+  "DISCERN_OPENAI_API_KEY", "OPENAI_API_KEY",
 ];
 
 export const CANDIDATES = [
@@ -96,7 +100,7 @@ export function policyExcerpt(policy) {
 // invalid responses, and below-threshold probabilities all defer to the
 // harness's own permission flow by returning null.
 export function mapDecision(result, { blockThreshold = DEFAULT_BLOCK_THRESHOLD, askEnabled = false, policy = "" } = {}) {
-  if (!result || result.tool !== "jev_decide") return null;
+  if (!result || result.tool !== "discern_decide") return null;
   const rec = result.recommendation;
   if (!rec || rec.selected === null || rec.status === "invalid_response") return null;
   const probabilities = rec.probabilities && typeof rec.probabilities === "object" ? rec.probabilities : {};
@@ -106,14 +110,14 @@ export function mapDecision(result, { blockThreshold = DEFAULT_BLOCK_THRESHOLD, 
     return {
       permissionDecision: "deny",
       permissionDecisionReason:
-        `Jev gate denied this tool call: block probability ${prob("block").toFixed(2)} at threshold ${blockThreshold}. ` +
+        `Discern gate denied this tool call: block probability ${prob("block").toFixed(2)} at threshold ${blockThreshold}. ` +
         `Policy: ${excerpt}. Propose a different action that complies with the policy, or ask the user.`,
     };
   }
   if (askEnabled && rec.selected === "ask_user") {
     return {
       permissionDecision: "ask",
-      permissionDecisionReason: `Jev gate: the judgment escaped to ask_user, so it could not clear this call against the policy. Policy: ${excerpt}`,
+      permissionDecisionReason: `Discern gate: the judgment escaped to ask_user, so it could not clear this call against the policy. Policy: ${excerpt}`,
     };
   }
   return null;
@@ -125,10 +129,10 @@ export function harnessOutput({ permissionDecision, permissionDecisionReason }) 
 
 // One judgment over an injected callTool so tests can stub the MCP round trip.
 export async function judge(callTool, payload, options) {
-  const response = await callTool({ name: "jev_decide", arguments: buildDecision(payload, options.policy) });
-  if (response.isError) throw new Error("jev_decide returned a tool error");
+  const response = await callTool({ name: "discern_decide", arguments: buildDecision(payload, options.policy) });
+  if (response.isError) throw new Error("discern_decide returned a tool error");
   const block = response.content?.find((item) => item.type === "text");
-  if (!block) throw new Error("jev_decide returned no text payload");
+  if (!block) throw new Error("discern_decide returned no text payload");
   return mapDecision(JSON.parse(block.text), options);
 }
 
@@ -205,7 +209,7 @@ async function main() {
   try {
   const policy = options.policyFile ? await readFile(options.policyFile, "utf8") : options.policy;
   if (!policy.trim()) throw new Error("The policy is empty");
-  if (policy.length > MAX_POLICY_CHARS) throw new Error(`The policy is ${policy.length} characters; jev_decide priorities are capped at ${MAX_POLICY_CHARS}`);
+  if (policy.length > MAX_POLICY_CHARS) throw new Error(`The policy is ${policy.length} characters; discern_decide priorities are capped at ${MAX_POLICY_CHARS}`);
 
   let raw = "";
   let bytes = 0;
@@ -228,16 +232,17 @@ async function main() {
     return;
   }
 
-  const provider = process.env.JEV_PROVIDER ?? "typesafe";
-  if (provider === "typesafe" && !process.env.TYPESAFE_API_KEY) {
-    throw new Error("Set TYPESAFE_API_KEY (or configure JEV_PROVIDER), or use --dry-run to inspect the judgment inputs without Jev");
+  const { env } = normalizeDiscernEnv(process.env);
+  const provider = env.DISCERN_PROVIDER || "typesafe";
+  if (provider === "typesafe" && !env.TYPESAFE_API_KEY) {
+    throw new Error("Set TYPESAFE_API_KEY (or configure DISCERN_PROVIDER), or use --dry-run to inspect the judgment inputs without calling a provider");
   }
 
   const client = new Client({ name: "hook-gate-example", version: "1.0.0" });
   transport = new StdioClientTransport({
     command: process.execPath,
     args: [fileURLToPath(new URL("../dist/index.js", import.meta.url))],
-    env: Object.fromEntries(FORWARDED_ENV_KEYS.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])),
+    env: Object.fromEntries(FORWARDED_ENV_KEYS.filter((k) => env[k] !== undefined).map((k) => [k, env[k]])),
   });
   // A judgment failure must never brick the harness: print nothing, exit 0,
   // and the harness's own permission flow stays in charge.
