@@ -9,7 +9,7 @@ jev-mcp is now **discern-mcp**: `@jkudish/discern-mcp`, bin `discern-mcp`. "Jev"
 - Environment variables are `DISCERN_*` (`DISCERN_PROVIDER`, `DISCERN_MCP_MODEL`, `DISCERN_MCP_AUTH_TOKEN`, …). Every `JEV_<X>` still works as an alias of `DISCERN_<X>` and prints one stderr deprecation line at startup. Setting both to different values fails at startup with an error that names both variables and never their values. An empty `DISCERN_MCP_MODEL` now means the default model.
 - Compatibility package: `@jkudish/jev-mcp` 1.0.0 depends on `@jkudish/discern-mcp` and runs it with `DISCERN_TOOL_NAMES=jev`, so existing `npx @jkudish/jev-mcp` configs and permission allowlists keep working. It also re-exports the `./server` library entry.
 - OpenAI Decisions provider: `DISCERN_PROVIDER=openai` with `DISCERN_OPENAI_API_KEY` or `OPENAI_API_KEY`, via the shared `@jkudish/discern-agent-tools` transport. Never auto-detected. Refusals invalidate only the refused judgment.
-- Library: `createServer({ toolNames })` and `resolveToolNames()` are exported from `./server`; the CLI is exported as `./cli`. Shared provider code moves to `@jkudish/discern-agent-tools` 1.0.0.
+- Library: `createServer({ toolNames })` and `resolveToolNames()` are exported from `./server`; the bin entry is exported as `./bin`. Shared provider code moves to `@jkudish/discern-agent-tools` 1.0.0.
 - Startup configuration errors (env conflicts, invalid `DISCERN_TOOL_NAMES`) print one `[discern-mcp]` line on stderr and exit 1. stdout stays reserved for MCP.
 - Tool descriptions no longer attribute every judgment to Jev; the configured provider answers.
 - The skill moves from `skills/jev` to `skills/discern`.

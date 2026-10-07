@@ -4,4 +4,4 @@
 // permission allowlists keep matching; the discern_* names stay callable.
 // An explicit DISCERN_TOOL_NAMES (or its legacy JEV_TOOL_NAMES alias) wins.
 if (!process.env.DISCERN_TOOL_NAMES && !process.env.JEV_TOOL_NAMES) process.env.DISCERN_TOOL_NAMES = "jev";
-await import("@jkudish/discern-mcp/cli");
+await import("@jkudish/discern-mcp/bin");
