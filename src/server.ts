@@ -138,16 +138,16 @@ function defineTool<Input extends StandardSchemaWithJSON>(
  * Advertise only `prefix`_* tools in tools/list while every registered alias
  * stays callable. The SDK has no public way to hide an enabled tool:
  * RegisteredTool.disable() also rejects calls ("Tool jev_x disabled"). So
- * this wraps the SDK's own tools/list handler, which it reads from the
- * protocol's private request-handler map (verified on
- * @modelcontextprotocol/server 2.3.x). test/aliases.test.mjs lists and calls
+ * this wraps the SDK's own tools/list handler, read through the Protocol
+ * class's protected _getRequestHandler accessor. This is the only non-public
+ * SDK access in the package, and discern-browser uses the same accessor
+ * (verified on @modelcontextprotocol/server 2.3.x). test/aliases.test.mjs lists and calls
  * aliases through a real client over stdio and HTTP, so an SDK change that
  * breaks this fails CI instead of silently listing both prefixes.
  */
 function listOnlyPrefix(server: McpServer, prefix: ToolNames): void {
   type ListHandler = (request: unknown, ctx: unknown) => Promise<ListToolsResult>;
-  const handlers = (server.server as unknown as { _requestHandlers?: Map<string, ListHandler> })._requestHandlers;
-  const original = handlers?.get("tools/list");
+  const original = (server.server as unknown as { _getRequestHandler?(method: string): ListHandler | undefined })._getRequestHandler?.("tools/list");
   if (!original) throw new Error("MCP SDK tools/list handler not found; tool-name aliasing needs updating for this SDK version.");
   server.server.removeRequestHandler("tools/list");
   server.server.setRequestHandler("tools/list", async (request, ctx) => {
@@ -2195,7 +2195,7 @@ defineTool(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Boot lives in index.ts (the `discern-mcp` bin, also exported as `./cli`).
+// Boot lives in index.ts (the `discern-mcp` bin, also exported as `./bin`).
 // This module is deliberately side-effect-free beyond tool registration and
 // the JEV_* env aliases (env.ts):
 // importing it never starts a transport. Embedders use it directly via

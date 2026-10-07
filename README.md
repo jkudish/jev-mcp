@@ -156,7 +156,7 @@ The `discern-mcp` bin boots a transport when run; importing the package never do
 - `import { createServer } from "@jkudish/discern-mcp"` — side-effect-free: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all twelve, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/discern-mcp/server` is an explicit alias for the same entry.
 - `MODEL` is exported alongside it, resolved from `DISCERN_MCP_MODEL` at import time (default `jev-latest`), so embedders report the same model the CLI serves.
 - `createServer({ toolNames })` chooses which tool names `tools/list` shows (`"discern"` or `"jev"`); without it, `DISCERN_TOOL_NAMES` decides via the exported `resolveToolNames()`. Importing the module applies the `JEV_*` environment aliases to `process.env`, and throws if a `JEV_` and `DISCERN_` pair conflicts.
-- `@jkudish/discern-mcp/cli` is the bin entry; importing it starts a transport, exactly like running `discern-mcp`.
+- `@jkudish/discern-mcp/bin` is the bin entry; importing it starts a transport, exactly like running `discern-mcp`.
 - The package now declares `exports`, so deep imports like `@jkudish/discern-mcp/dist/index.js` no longer resolve. Before the exports map, importing that path booted a transport inside the importer's process — the trap `/server` and the safe root entry replace. `dist/index.js` remains the bin and still boots when executed.
 
 ### Agent skill

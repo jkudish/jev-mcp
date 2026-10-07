@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // discern-mcp CLI: boots the MCP server over stdio (default) or stateless HTTP.
 //
-// This entry is the `discern-mcp` bin (also exported as `./cli` so the
+// This entry is the `discern-mcp` bin (also exported as `./bin` so the
 // `@jkudish/jev-mcp` compat package can run it in-process); running it starts
 // a transport. It is NOT the package's import entry: `exports` maps the root
 // import to dist/server.js, which exposes `createServer()` without booting
