@@ -796,7 +796,7 @@ With `AI_GATEWAY_API_KEY` set, judgments run through the Vercel AI Gateway at `t
 
 - This is not Jev. `gpt-6-luna` has its own calibration, so `auto_accept`, `review_at`, and other thresholds tuned on Jev need re-checking against your own labeled cases before you rely on them.
 - It is never auto-detected, because `OPENAI_API_KEY` is set in many environments that never chose it.
-- The shared package translates the wire format: state becomes a JSON string `input`, noul true/false descriptions are folded into predicate instructions, and the answers array is keyed back by question name. Requests above OpenAI's 200-question limit (for example a 250-candidate `jev_rerank`) are split into concurrent requests.
+- The shared package translates the wire format: state becomes a labeled, pretty-printed JSON `input`, each noul becomes a true/false choice carrying its criteria, and the answers array is keyed back by question name. Requests above OpenAI's 200-question limit (for example a 250-candidate `jev_rerank`) are split into concurrent requests.
 - A question OpenAI declines comes back as a refusal. The affected judgment is `invalid_response`; its siblings are unaffected.
 - Data goes to OpenAI under your organization's data controls. Zero data retention applies only if your organization is eligible and has it enabled.
 
