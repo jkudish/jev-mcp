@@ -2,22 +2,34 @@
 
 ## 1.0.0 (unreleased)
 
-jev-mcp is now **discern-mcp**: `@jkudish/discern-mcp`, bin `discern-mcp`. "Jev" names TypeSafe's model, and the server now also runs on Cloudflare's Clef and OpenAI's Decisions API, so the package takes a provider-neutral name. The old package name, tool names, and environment variables keep working through 1.x and are removed in 2.0. Two things do change: `serverInfo.name` is `discern-mcp`, and the bundled agent skill moved from `skills/jev` to `skills/discern` (the compatibility package ships no skill). See [Migrating from jev-mcp](README.md#migrating-from-jev-mcp).
+jev-mcp is now **discern-mcp**. "Jev" names TypeSafe's model, and the server now also runs on Cloudflare's Clef and OpenAI's Decisions API, so it takes a provider-neutral name. The old package name, tool names, and environment variables keep working through 1.x and are removed in 2.0. Two things change right away: `serverInfo.name` is `discern-mcp`, and the agent skill moved from `skills/jev` to `skills/discern`. See [Migrating from jev-mcp](README.md#migrating-from-jev-mcp).
 
-- Breaking: the package is `@jkudish/discern-mcp` and the bin is `discern-mcp`. MCP `serverInfo.name` and stderr log lines say `discern-mcp`.
-- Tools are listed as `discern_*` (`discern_verify`, `discern_gate`, …). The matching `jev_*` names stay callable as hidden aliases. `DISCERN_TOOL_NAMES=jev` lists the `jev_*` names instead, with `discern_*` still callable; any other value fails at startup. Each result's `tool` field echoes the name that was called.
-- Environment variables are `DISCERN_*` (`DISCERN_PROVIDER`, `DISCERN_MCP_MODEL`, `DISCERN_MCP_AUTH_TOKEN`, …). Every `JEV_<X>` still works as an alias of `DISCERN_<X>` and prints one stderr deprecation line at startup. Setting both to different values fails at startup with an error that names both variables and never their values. An empty `DISCERN_MCP_MODEL` now means the default model.
-- Compatibility package: `@jkudish/jev-mcp` 1.0.0 depends on `@jkudish/discern-mcp` and runs it with `DISCERN_TOOL_NAMES=jev`, so existing `npx @jkudish/jev-mcp` configs and permission allowlists keep working. It also re-exports the `./server` library entry.
-- All provider transports now live in `@jkudish/discern-agent-tools`; this package keeps only per-judgment validation. TypeSafe, Vercel, and OpenAI gain the same deadline (`DISCERN_MCP_REQUEST_TIMEOUT_MS`) and retry limit (`DISCERN_MCP_MAX_ATTEMPTS`) the other providers had. Error messages change to `Discern provider <name>: request failed (HTTP <status>)`, `… (HTTP 400, max_tokens_exceeded)` for OpenRouter's token limit, and `… no answer within the <n>ms deadline`. A malformed envelope from the compatible endpoint or OpenRouter now fails each judgment closed as `invalid_response` instead of failing the call, matching the other providers, and a missing `usage` counter counts as zero.
-- The default model is the neutral `latest`: Jev on Jev providers, `gpt-6-luna` on OpenAI. `jev-latest` keeps working.
-- The library no longer changes `process.env` on import. It reads a normalized copy; `createServer()` reports a `JEV_`/`DISCERN_` conflict. Only the `discern-mcp` bin writes the aliases into `process.env`.
-- Only the documented `JEV_*` variables are aliased; other `JEV_*` variables are ignored.
-- Cloudflare Clef models: `DISCERN_PROVIDER=cloudflare` with `DISCERN_MCP_MODEL=clef` or `clef-flash` runs Cloudflare's Clef decision models through the existing Cloudflare transport and its retry and deadline rules.
-- OpenAI Decisions provider: `DISCERN_PROVIDER=openai` with `DISCERN_OPENAI_API_KEY` or `OPENAI_API_KEY`, via the shared `@jkudish/discern-agent-tools` transport. Never auto-detected. Refusals invalidate only the refused judgment.
-- Library: `createServer({ toolNames })` and `resolveToolNames()` are exported from `./server`; the bin entry is exported as `./bin`. Shared provider code moves to `@jkudish/discern-agent-tools` 1.0.0.
-- Startup configuration errors (env conflicts, invalid `DISCERN_TOOL_NAMES`) print one `[discern-mcp]` line on stderr and exit 1. stdout stays reserved for MCP.
-- Tool descriptions no longer attribute every judgment to Jev; the configured provider answers.
-- The skill moves from `skills/jev` to `skills/discern`.
+### Rename
+
+- The package is `@jkudish/discern-mcp` and the bin is `discern-mcp`. Startup lines on stderr say `discern-mcp`.
+- Tools are listed as `discern_*`. The matching `jev_*` names stay callable as hidden aliases, and each result's `tool` field echoes the name you called. `DISCERN_TOOL_NAMES=jev` lists the `jev_*` names instead; any value other than `discern` or `jev` fails at startup.
+- Environment variables are `DISCERN_*`. The documented `JEV_*` names still work, each printing one stderr deprecation line; other `JEV_*` variables are ignored. Setting both names to different values fails at startup with an error that names both variables and never their values.
+- The compatibility package `@jkudish/jev-mcp` 1.0.0 runs discern-mcp with `DISCERN_TOOL_NAMES=jev`, so existing `npx @jkudish/jev-mcp` configs and permission allowlists keep working. It re-exports `./server` and ships no skill.
+
+### Providers
+
+- OpenAI Decisions: `DISCERN_PROVIDER=openai` with `DISCERN_OPENAI_API_KEY` or `OPENAI_API_KEY`. Never auto-detected. A refused question invalidates only that judgment.
+- Cloudflare's Clef: `DISCERN_PROVIDER=cloudflare` with `DISCERN_MCP_MODEL=clef` or `clef-flash`.
+- The default model is the neutral `latest`: Jev on Jev providers, `gpt-6-luna` on OpenAI. `jev-latest` keeps working. An empty `DISCERN_MCP_MODEL` means the default.
+- Every provider transport now lives in `@jkudish/discern-agent-tools` 1.0.0; this server keeps only per-judgment validation. TypeSafe, Vercel, and OpenAI gain the deadline (`DISCERN_MCP_REQUEST_TIMEOUT_MS`) and retry limit (`DISCERN_MCP_MAX_ATTEMPTS`) the other providers already had.
+
+### Behavior changes
+
+- Error messages read `Discern provider <name>: request failed (HTTP <status>)`, with `, max_tokens_exceeded` for OpenRouter's token limit, and `Discern provider <name>: no answer within the <n>ms deadline` on timeout.
+- A malformed envelope from the compatible endpoint or OpenRouter fails each judgment closed as `invalid_response` instead of failing the call, as on the other providers. A missing `usage` counter counts as zero.
+- Startup configuration errors (an env conflict, an invalid `DISCERN_TOOL_NAMES`) print one `[discern-mcp]` line on stderr and exit 1. stdout stays reserved for MCP.
+- Tool descriptions no longer attribute every judgment to Jev.
+
+### Library
+
+- `createServer({ toolNames })` and `resolveToolNames()` are exported from `./server`. Tools you register on the returned server are listed normally.
+- Importing the library no longer changes `process.env`. It reads a normalized copy, and `createServer()` reports a `JEV_`/`DISCERN_` conflict. Only the `discern-mcp` bin writes the aliases into `process.env`.
+- The bin entry is exported as `./bin`; importing it starts a transport.
 
 ## 0.14.1
 

@@ -3,7 +3,7 @@
 Agent harnesses intercept their own tool calls: a `PreToolUse` hook sees every
 proposed action before it runs and can allow, deny, or escalate it. This
 source-checkout example connects that interception point to `discern_decide`, so a
-written policy — not a hand-written regex list — decides which calls are too
+written policy, not a hand-written regex list, decides which calls are too
 dangerous to run silently. The judgment happens out of band: it adds nothing to
 the conversation, and every tool call that does not match the harness matcher
 never pays for it.
@@ -25,9 +25,9 @@ what the previous one could not:
    obviously safe shapes (`^Bash git status`), and inputs over 4,000 characters
    defer: both print nothing and exit 0, so the harness's own permission flow
    applies at zero cost.
-3. **One `discern_decide` call** — candidates `proceed`/`block`, escape hatches on,
-   your policy in `priorities`, the tool call framed as untrusted facts —
-   judges exactly what matched.
+3. **One `discern_decide` call**: candidates `proceed`/`block`, escape hatches on,
+   your policy in `priorities`, the tool call framed as untrusted facts;
+   it judges exactly what matched.
 4. **A verdict is emitted only on a confident, valid judgment.** `deny` needs
    `block` selected with probability at or above `--block-threshold`
    (default 0.85). Everything else prints nothing and exits 0: provider
@@ -58,7 +58,7 @@ node examples/hook-gate.mjs --policy-file policy.md < examples/hook-gate-sample.
 
 `--policy` / `--policy-file` carry the policy (bounded at 2,000 characters to
 fit `discern_decide` priorities). `--ask` maps the `ask_user` escape hatch to
-`permissionDecision: "ask"` (Claude Code only — Codex reports `ask` as an
+`permissionDecision: "ask"` (Claude Code only; Codex reports `ask` as an
 unsupported verdict and continues the call). There is no auto-allow option:
 `proceed` always defers to the harness. `--block-threshold` is between 0.5
 and 1. `--timeout-ms` (default 15,000; maximum 60,000) bounds policy loading,
@@ -192,8 +192,8 @@ hook payloads (the `--dry-run` output shape), label each with your own
 allow/block/unsure call, then sweep `--block-threshold` and count false denies
 (calls blocked that should have run) and misses (calls that ran but should
 have been blocked). Repeat with a pinned `DISCERN_MCP_MODEL` before making claims;
-a tiny sample is only a smoke test. Expect roughly a second per judged call —
-process spawn plus one provider round trip — which is why the matcher and `--skip`
+a tiny sample is only a smoke test. Expect roughly a second per judged call
+(process spawn plus one provider round trip), which is why the matcher and `--skip`
 layers exist: judge the few, not the many.
 
 Offline adapter checks run as part of `npm test`. They use controlled

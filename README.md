@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 <p align="center">
-  <img src=".github/discern-mcp-banner.png" alt="discern-mcp — Typed judgments with calibrated probabilities, as MCP tools. Runs on TypeSafe's Jev, Cloudflare's Clef, or OpenAI Decisions." />
+  <img src=".github/discern-mcp-banner.png" alt="discern-mcp: typed judgments with calibrated probabilities, as MCP tools. Runs on TypeSafe's Jev, Cloudflare's Clef, or OpenAI Decisions." />
 </p>
 
 Fast, cheap, typed judgments as MCP tools, answered by TypeSafe's Jev model by default, or by Cloudflare's Clef or OpenAI's Decisions API.
@@ -153,11 +153,11 @@ The server itself speaks plain HTTP: terminate TLS at a reverse proxy or load ba
 
 The `discern-mcp` bin boots a transport when run; importing the package never does. To run the tools in-process (an agent hook, a larger server, a test harness):
 
-- `import { createServer } from "@jkudish/discern-mcp"` — starts no transport: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all twelve, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/discern-mcp/server` is an explicit alias for the same entry.
+- `import { createServer } from "@jkudish/discern-mcp"` starts no transport: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all twelve, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/discern-mcp/server` is an explicit alias for the same entry.
 - `MODEL` is exported alongside it, resolved from `DISCERN_MCP_MODEL` at import time (default `latest`, each provider's current default model), so embedders report the same model the CLI serves.
 - `createServer({ toolNames })` chooses which tool names `tools/list` shows (`"discern"` or `"jev"`); without it, `DISCERN_TOOL_NAMES` decides via the exported `resolveToolNames()`. The library never changes `process.env`: it reads a copy with the `JEV_*` aliases applied, and `createServer()` throws if a `JEV_` and `DISCERN_` pair conflicts. Only the `discern-mcp` bin writes the aliases into `process.env`.
 - `@jkudish/discern-mcp/bin` is the bin entry; importing it starts a transport, exactly like running `discern-mcp`.
-- The package now declares `exports`, so deep imports like `@jkudish/discern-mcp/dist/index.js` no longer resolve. Before the exports map, importing that path booted a transport inside the importer's process — the trap `/server` and the safe root entry replace. `dist/index.js` remains the bin and still boots when executed.
+- The package now declares `exports`, so deep imports like `@jkudish/discern-mcp/dist/index.js` no longer resolve. Before the exports map, importing that path booted a transport inside the importer's process, the trap `/server` and the safe root entry replace. `dist/index.js` remains the bin and still boots when executed.
 
 ### Agent skill
 
@@ -384,7 +384,7 @@ One bounded decision, 2-6 candidates, evidence, and explicit priorities. The mod
 
 - Escape hatches (`ask_user`, `investigate`, `none`) let the model decline to rank when a preference or fact is missing; `escaped: true` in the result marks it. Disable with `escape_hatches: false` for closed-world choices.
 - Requirement checks run as independent questions in the same request and may disagree with the recommendation; `recommendation.contradicted_requirements` names the zero-based requirement indexes whose checks came back `contradicted` for the selected candidate, and a contradiction also surfaces as a warning.
-- Pass `escalate_on_contradiction: true` to withdraw a contradicted recommendation in addition to the warning: the result comes back `selected: null` with `status: "escalate"` (the `discern_verify` vocabulary), probabilities and `contradicted_requirements` intact. The indexes describe the recommended candidate before withdrawal — `selected` is null afterward. The default keeps the recommendation and warns. No re-selection: a withdrawn recommendation is never silently replaced by the runner-up.
+- Pass `escalate_on_contradiction: true` to withdraw a contradicted recommendation in addition to the warning: the result comes back `selected: null` with `status: "escalate"` (the `discern_verify` vocabulary), probabilities and `contradicted_requirements` intact. The indexes describe the recommended candidate before withdrawal; `selected` is null afterward. The default keeps the recommendation and warns. No re-selection: a withdrawn recommendation is never silently replaced by the runner-up.
 - One call per unchanged decision. Repeat only with materially new evidence or criteria.
 
 <sub>Pattern credit: [thesammykins/jev_ampcode](https://github.com/thesammykins/jev_ampcode).</sub>
@@ -498,7 +498,7 @@ Pull structured fields out of a document with your regex and the model's judgmen
 
 ### discern_audit
 
-Audit extracted values against the text they claim to come from, before the values are trusted. For each value, one request carries a failure-mode battery — hallucinated, off-target, incomplete, wrong format — each a yes/no question framed so that yes means something is wrong, plus a dedicated omission check for values that came back empty. A value's `p_wrong` is the maximum over its checks; any value at or above `wrong_at` (default 0.7) escalates the whole audit. Max-gated, never averaged: one fired flag cannot be diluted by clean siblings.
+Audit extracted values against the text they claim to come from, before the values are trusted. For each value, one request carries a failure-mode battery (hallucinated, off-target, incomplete, wrong format), each a yes/no question framed so that yes means something is wrong, plus a dedicated omission check for values that came back empty. A value's `p_wrong` is the maximum over its checks; any value at or above `wrong_at` (default 0.7) escalates the whole audit. Max-gated, never averaged: one fired flag cannot be diluted by clean siblings.
 
 ```jsonc
 // arguments
@@ -528,7 +528,7 @@ Audit extracted values against the text they claim to come from, before the valu
 }
 ```
 
-- Here the currency was fabricated — the invoice never states one — and the `hallucinated` check catches what a schema-valid extraction would happily pass through.
+- Here the currency was fabricated (the invoice never states one), and the `hallucinated` check catches what a schema-valid extraction would happily pass through.
 - The framing discipline is the point: every check asks "is something wrong", so one threshold routes the record. The battery, the omission special case, and the max gate come from TypeSafe's SDE cascade cookbook, where this verifier is what catches a schema-valid fabrication.
 - An empty value gets only the omission check: wrong when the source supports a value the extractor missed, correct when returning nothing was right.
 - Malformed answers mark the record `invalid_response` and escalate: a protocol failure is never a clean pass. A truncated `source` (over 50,000 characters) demotes `pass` to `review`, never keeps it.
@@ -536,12 +536,12 @@ Audit extracted values against the text they claim to come from, before the valu
 
 #### Multimodal intake
 
-The judgment models read text only — state is a string, JSON object, or array, and images, audio, and video are not supported (pre-process to text first, per the TypeSafe docs). Multimodal judgment therefore lands as a cascade, with the text artifacts cross-checked by the text-only judge:
+The judgment models read text only: state is a string, JSON object, or array, and images, audio, and video are not supported (pre-process to text first, per the TypeSafe docs). Multimodal judgment therefore lands as a cascade, with the text artifacts cross-checked by the text-only judge:
 
 1. **Extract** with your host model: a vision or ASR model produces a dense transcript of the image, scan, or recording, plus the structured values you want.
-2. **Screen** the transcript with `discern_screen`: transcripts of fetched content are untrusted text and get the injection screen before anything else. The screen is advice you enforce — honor `block` and `review` before passing the transcript onward. It protects what enters your context, not the vision or ASR model, which has already consumed the untrusted material.
-3. **Audit** the values against the transcript with `discern_audit`. This is a cross-check between two text artifacts, not verification of the original: when the original text exists (a document, a page), audit against it directly. For vision or ASR output, one host model usually produces both the transcript and the values, so the same misreading can appear in both and pass the audit — producing the two separately, or with independent models, makes the cross-check stronger. `pass` means no check crossed the threshold, never that the values were verified against the pixels or audio.
-4. **Judge** with the existing tools — verify claims, classify, review — over the audited text, keeping the provenance in state so downstream judgments know they read an extraction, not the original.
+2. **Screen** the transcript with `discern_screen`: transcripts of fetched content are untrusted text and get the injection screen before anything else. The screen is advice you enforce: honor `block` and `review` before passing the transcript onward. It protects what enters your context, not the vision or ASR model, which has already consumed the untrusted material.
+3. **Audit** the values against the transcript with `discern_audit`. This is a cross-check between two text artifacts, not verification of the original: when the original text exists (a document, a page), audit against it directly. For vision or ASR output, one host model usually produces both the transcript and the values, so the same misreading can appear in both and pass the audit. Producing the two separately, or with independent models, makes the cross-check stronger. `pass` means no check crossed the threshold, never that the values were verified against the pixels or audio.
+4. **Judge** with the existing tools (verify claims, classify, review) over the audited text, keeping the provenance in state so downstream judgments know they read an extraction, not the original.
 
 <sub>Question design adapted from the TypeSafe [SDE cascade cookbook](https://docs.typesafe.ai/cookbooks/sde_cascade) (see [#45](https://github.com/jkudish/discern-mcp/issues/45)).</sub>
 
@@ -579,16 +579,16 @@ Score a proposed diff against the request before the task is called done. The mo
 }
 ```
 
-- Why the example escalates: the composite clears the floor, but the failing test drags `safe_to_apply` to 0.24 and rubric confidences sit under `review_at` — decent scores don't sail through on their own.
+- Why the example escalates: the composite clears the floor, but the failing test drags `safe_to_apply` to 0.24 and rubric confidences sit under `review_at`, so decent scores don't sail through on their own.
 - Rubric scores run 0..2. Higher is better for `correctness` and `spec_match`; higher is worse for `test_gap` and `blast_radius`, and the composite inverts those two before weighting, so a composite of 1.0 means favorable on every rubric.
 - A score answer may carry its full probability distribution over the three options; when the provider reports one, it is validated (exact keys, probabilities summing to one, expected value within a small tolerance of the reported score) and returned in `scores.*.probabilities`. Absent means "not reported" and stays `null`; a distribution that is present but malformed or contradictory marks that rubric `invalid_response`.
 - `reason_codes` collects why the review decided as it did: `invalid_response`, `unknown_confidence`, `confidence_below_review`, `safe_to_apply_below_review`, `confidence_below_auto_accept`, `safe_to_apply_below_auto_accept`, `composite_below_floor`, `incomplete_context`, `accepted`. `limiting_rubrics` names the rubric(s) that bound the decision, ties included: the null-confidence rubrics when confidence is unknown, every rubric tied at the minimum confidence when a confidence threshold blocks, and the least favorable rubrics when the composite floor blocks.
 - `auto` requires `safe_to_apply` and every rubric confidence at `auto_accept` and the composite at `composite_floor`. `safe_to_apply` or any rubric confidence below `review_at`, or unknown, escalates; a composite below `composite_floor` returns `review`, not `escalate`. Unknown confidence counts as escalate, never as a value that can satisfy a threshold.
 - `request` frames the review; it is not proof of anything. Put real output in `tests`. Every field is treated as evidence to evaluate, never instructions to follow.
 - Each text field is capped at 50,000 characters. Truncated input sets `truncated: true` and can never return `auto`; a malformed answer is `invalid_response`, not a semantic outcome.
-- Multi-file change: pass `files` (an array of `{ path, diff }`, up to 16 files) instead of `diff` — exactly one of the two. `discern_gate` takes the same `files` input for its review half.
+- Multi-file change: pass `files` (an array of `{ path, diff }`, up to 16 files) instead of `diff`; send exactly one of the two. `discern_gate` takes the same `files` input for its review half.
 - The rubric is asked once per file, all in one request, each question scoped to its own file by index; the result carries `mode: "per-file"` and a `files` array with the full per-file review.
-- Composed top-level fields: the change is `auto` only when every file is `auto`, `composite` is the file mean, `safe_to_apply` is the file minimum, and `limiting` names the file and rubrics that bound the decision. Nothing is averaged into invisibility — a weak file stays visible as itself.
+- Composed top-level fields: the change is `auto` only when every file is `auto`, `composite` is the file mean, `safe_to_apply` is the file minimum, and `limiting` names the file and rubrics that bound the decision. Nothing is averaged into invisibility; a weak file stays visible as itself.
 - One request must fit the combined budget: `request` + `tests` + all file diffs together stay under 200,000 characters.
 - Truncation is per-file: only the file whose own diff (or the shared request/tests context) was truncated is demoted to `review`; an intact file is never demoted for a truncated sibling.
 
@@ -638,7 +638,7 @@ The completion gate: the same patch review as `discern_review`, plus your comple
 }
 ```
 
-- In the example, the two true claims verify at full confidence, and the one that matters — "the full test suite passes" — is contradicted by the test log at full confidence: exactly the claim a coding agent is most tempted to hand-wave.
+- In the example, the two true claims verify at full confidence, and the one that matters, "the full test suite passes", is contradicted by the test log at full confidence: exactly the claim a coding agent is most tempted to hand-wave.
 - Claim questions instruct the model to use `evidence` only, not world knowledge, and not the request, diff, or tests fields; if a claim needs a diff excerpt or a test log as support, supply it in `evidence`. All fields share one model state, so this is instruction-level isolation, not a hard boundary. Every field is evidence to evaluate, never instructions to follow.
 - `reason_codes` collects why the gate decided as it did: `incomplete_context`, `invalid_response`, `review_escalated`, `review_required`, plus the review half's specific codes (`unknown_confidence`, `confidence_below_review`, `safe_to_apply_below_review`, `confidence_below_auto_accept`, `safe_to_apply_below_auto_accept`, `composite_below_floor`), `claims_contradicted`, `claims_unsupported`, `claim_confidence_low`, `claim_confidence_below_auto_accept`, `accepted`. The embedded `review` object carries the same `reason_codes` and `limiting_rubrics` a standalone `discern_review` returns.
 - Up to 16 claims and 16 evidence items per call. Text fields are capped at 50,000 characters each, claims at 2,000, and evidence at 200,000 characters in aggregate; oversized evidence is rejected before any model call. Malformed answers surface as `invalid_response` and the gate never returns `auto` on one.
@@ -730,7 +730,7 @@ Then decide the route, feeding that answer in as evidence. The `requirements` fi
 
 ## Inside the harness: hooks
 
-The tools judge what the model brings into the conversation. The [hook gate example](examples/hook-gate.md) runs the same judgment out of band: a `PreToolUse` hook in Claude Code, Codex, OpenCode, or pi sends each proposed tool call to one `discern_decide` call measured against your written policy, and denies the confident violations with a reason the model can act on. The harness matcher routes for free, local skip rules and size caps defer cheaply, and anything the gate cannot confidently deny falls through to the harness's own permission flow — so a provider outage never blocks the agent. Deny thresholds are parameters, not promises.
+The tools judge what the model brings into the conversation. The [hook gate example](examples/hook-gate.md) runs the same judgment out of band: a `PreToolUse` hook in Claude Code, Codex, OpenCode, or pi sends each proposed tool call to one `discern_decide` call measured against your written policy, and denies the confident violations with a reason the model can act on. The harness matcher routes for free, local skip rules and size caps defer cheaply, and anything the gate cannot confidently deny falls through to the harness's own permission flow, so a provider outage never blocks the agent. Deny thresholds are parameters, not promises.
 
 ## How the answers work
 
@@ -748,16 +748,17 @@ For Choice and Score, `confidence` measures how peaked the option probabilities 
 
 ### Providers
 
-Built-in provider selection runs through the shared [@jkudish/discern-agent-tools](https://github.com/jkudish/discern-agent-tools) wire package: it picks a carrier from your environment, sends the judgment, and validates the answer before any tool sees it. Four carriers are built in, tried in this order:
+Built-in provider selection runs through the shared [@jkudish/discern-agent-tools](https://github.com/jkudish/discern-agent-tools) wire package: it picks a carrier from your environment, sends the judgment, and validates the answer before any tool sees it. Auto-detection tries these in order:
 
 - **TypeSafe** (`TYPESAFE_API_KEY`): direct, and the default when set.
 - **OpenRouter** (`OPENROUTER_API_KEY`).
-- **Cloudflare Workers AI** (`CLOUDFLARE_API_TOKEN` or `DISCERN_CLOUDFLARE_API_TOKEN`, plus `CLOUDFLARE_ACCOUNT_ID`).
+- **Cloudflare Workers AI** (`CLOUDFLARE_API_TOKEN` or `DISCERN_CLOUDFLARE_API_TOKEN`, plus `CLOUDFLARE_ACCOUNT_ID`). Serves Jev by default, and Cloudflare's Clef with `DISCERN_MCP_MODEL=clef` or `clef-flash`; see [Cloudflare](#cloudflare).
 - **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`).
+- **A System One-compatible endpoint** (`DISCERN_API_KEY` and `DISCERN_API_BASE_URL`), only when nothing above is configured; see [Jev-compatible endpoints](#jev-compatible-endpoints).
 
-A fifth carrier, **OpenAI Decisions**, is never auto-detected; select it with `DISCERN_PROVIDER=openai`. See [OpenAI Decisions](#openai-decisions).
+**OpenAI Decisions** is never auto-detected; select it with `DISCERN_PROVIDER=openai`. See [OpenAI Decisions](#openai-decisions).
 
-`DISCERN_PROVIDER` forces one, or `compatible` for any System One-compatible endpoint. Unknown names and missing credentials are configuration errors, never silent fallbacks. Every provider, including `compatible`, comes from the shared package with the same retry and deadline rules; see [Transport resilience](#transport-resilience).
+`DISCERN_PROVIDER` forces one. Unknown names and missing credentials are configuration errors, never silent fallbacks. Every provider, including `compatible`, comes from the shared package with the same retry and deadline rules; see [Transport resilience](#transport-resilience).
 
 The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/discern-agent-tools#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
 
@@ -773,14 +774,14 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `DISCERN_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Override the OpenAI API root (`/decisions` is appended). `OPENAI_BASE_URL` is deliberately ignored. |
 | `DISCERN_MCP_MODEL` | `latest` | `latest` is each provider's current default model (Jev, or `gpt-6-luna` on OpenAI). Pin a model: a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter; `clef` or `clef-flash` on Cloudflare. |
 | `DISCERN_TOOL_NAMES` | `discern` | Which tool names `tools/list` shows: `discern` (`discern_*`) or `jev` (`jev_*`, the 1.x compatibility names). Both sets stay callable. Any other value fails at startup. |
-| `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
-| `DISCERN_API_BASE_URL` + `DISCERN_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `DISCERN_PROVIDER=compatible`. `DISCERN_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
+| `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` | Custom direct endpoint (origin only; `/v1/systemone` is appended). |
+| `DISCERN_API_BASE_URL` + `DISCERN_API_KEY` | none | System One-compatible endpoint and Bearer token; used when no other provider is configured, or with `DISCERN_PROVIDER=compatible`. `DISCERN_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
 | `DISCERN_MCP_REQUEST_TIMEOUT_MS` | `60000` | Whole-request deadline in milliseconds, covering every attempt, on every provider. |
 | `DISCERN_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on every provider; retries happen only on 408, 409, 429, and 500 through 599. |
 | `DISCERN_OPENROUTER_BASE_URL` | `https://openrouter.ai/api` | Override the OpenRouter API root (the `/alpha/decisions` path is appended; a trailing slash is tolerated). |
 | `DISCERN_CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Override the Cloudflare API root (`/accounts/<id>/ai/run` is appended; a trailing slash is tolerated). |
 
-Through 1.x, every `DISCERN_*` variable can also be set under its old `JEV_*` name; see [Migrating from jev-mcp](#migrating-from-jev-mcp).
+Through 1.x, every `DISCERN_*` variable in this table can also be set under its old `JEV_*` name; see [Migrating from jev-mcp](#migrating-from-jev-mcp).
 
 ### Transport resilience
 
