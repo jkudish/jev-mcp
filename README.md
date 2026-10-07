@@ -351,7 +351,7 @@ Assign each item to one class from a shared catalog, in one batched request: the
 
 ### jev_decide
 
-One bounded decision, 2-6 candidates, evidence, and explicit priorities. Jev returns a Choice distribution over the candidates plus escape hatches, and a per-candidate per-requirement check, in one request.
+One bounded decision, 2-6 candidates, evidence, and explicit priorities. Jev returns a Choice distribution over the candidates plus escape hatches, and a per-candidate per-requirement check, in one request. With `JEV_PROVIDER=openai`, the same tool can judge inline images alongside the text through OpenAI's native Decisions API.
 
 ```jsonc
 // arguments
@@ -372,13 +372,16 @@ One bounded decision, 2-6 candidates, evidence, and explicit priorities. Jev ret
 {
   "recommendation": { "selected": "poll", "escaped": false, "confidence": 1,
                       "probabilities": { "poll": 1, "push": 0, "ask_user": 0 },
-                      "contradicted_requirements": [] },
+                      "contradicted_requirements": [],
+                      "reason": "Recommended poll (probability 1). Requirement checks: 1=supported." },
   "checks": [ { "candidate": "poll", "requirement": 0, "answer": "supported" },
               { "candidate": "push", "requirement": 0, "answer": "contradicted" } ]
 }
 ```
 
 - Escape hatches (`ask_user`, `investigate`, `none`) let the model decline to rank when a preference or fact is missing; `escaped: true` in the result marks it. Disable with `escape_hatches: false` for closed-world choices.
+- Optional `images` are `{id, data_url}` records, with unique slug ids and inline base64 PNG, JPEG, WebP, or GIF data URLs. Only `JEV_PROVIDER=openai` accepts them; other providers reject the call before sending anything. Up to eight images, four MiB each, eight MiB total. Hosted URLs and file ids are unsupported. `image_evidence` reports ids, media types, byte counts, and SHA-256 hashes without echoing base64. See the [runnable image example](examples/openai-decisions.md).
+- `recommendation.reason` summarizes the returned choice, its probability, and the chosen candidate's requirement checks, including escapes, withdrawn recommendations, and invalid responses. It is a deterministic audit summary, not generated reasoning or a description of image findings. Requirement numbers in the reason are one-based; structural indexes remain zero-based. No extra model call is made.
 - Requirement checks run as independent questions in the same request and may disagree with the recommendation; `recommendation.contradicted_requirements` names the zero-based requirement indexes whose checks came back `contradicted` for the selected candidate, and a contradiction also surfaces as a warning.
 - Pass `escalate_on_contradiction: true` to withdraw a contradicted recommendation in addition to the warning: the result comes back `selected: null` with `status: "escalate"` (the `jev_verify` vocabulary), probabilities and `contradicted_requirements` intact. The indexes describe the recommended candidate before withdrawal — `selected` is null afterward. The default keeps the recommendation and warns. No re-selection: a withdrawn recommendation is never silently replaced by the runner-up.
 - One call per unchanged decision. Repeat only with materially new evidence or criteria.
@@ -532,7 +535,7 @@ Audit extracted values against the text they claim to come from, before the valu
 
 #### Multimodal intake
 
-Jev reads text only — its state is a string, JSON object, or array, and images, audio, and video are not supported (pre-process to text first, per the TypeSafe docs). Multimodal judgment therefore lands as a cascade, with the text artifacts cross-checked by the text-only judge:
+Jev reads text only — its state is a string, JSON object, or array, and images, audio, and video are not supported (pre-process to text first, per the TypeSafe docs). `jev_audit` remains a text audit on every provider. For direct image decisions, `jev_decide` accepts images with the opt-in [OpenAI Decisions provider](#openai-decisions). The text-audit cascade cross-checks the extracted text artifacts:
 
 1. **Extract** with your host model: a vision or ASR model produces a dense transcript of the image, scan, or recording, plus the structured values you want.
 2. **Screen** the transcript with `jev_screen`: transcripts of fetched content are untrusted text and get the injection screen before anything else. The screen is advice you enforce — honor `block` and `review` before passing the transcript onward. It protects what enters your context, not the vision or ASR model, which has already consumed the untrusted material.
@@ -744,14 +747,14 @@ For Choice and Score, `confidence` measures how peaked the option probabilities 
 
 ### Providers
 
-Built-in provider selection runs through the shared [@jkudish/jev-agent-tools](https://github.com/jkudish/jev-agent-tools) wire package: it picks a carrier from your environment, sends the judgment, and validates the answer before any tool sees it. Four carriers are built in, tried in this order:
+Built-in Jev provider selection runs through the shared [@jkudish/jev-agent-tools](https://github.com/jkudish/jev-agent-tools) wire package: it picks a carrier from your environment, sends the judgment, and validates the answer before any tool sees it. Four Jev carriers are built in, tried in this order:
 
 - **TypeSafe** (`TYPESAFE_API_KEY`): direct, and the default when set.
 - **OpenRouter** (`OPENROUTER_API_KEY`).
 - **Cloudflare Workers AI** (`CLOUDFLARE_API_TOKEN` or `JEV_CLOUDFLARE_API_TOKEN`, plus `CLOUDFLARE_ACCOUNT_ID`).
 - **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`).
 
-`JEV_PROVIDER` forces one, or `compatible` for any System One-compatible endpoint. Unknown names and missing credentials are configuration errors, never silent fallbacks. For resilience reasons the OpenRouter, Cloudflare, and compatible transports are implemented locally; see [Transport resilience](#transport-resilience).
+`JEV_PROVIDER` forces one, `compatible` for any System One-compatible endpoint, or `openai` for the native [OpenAI Decisions API](#openai-decisions). OpenAI runs a different model and is explicit-only: an `OPENAI_API_KEY` never changes auto-selection. Unknown names and missing credentials are configuration errors, never silent fallbacks. For resilience reasons the OpenRouter, Cloudflare, compatible, and OpenAI transports are implemented locally; see [Transport resilience](#transport-resilience).
 
 The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/jev-agent-tools#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
 
@@ -761,19 +764,33 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `OPENROUTER_API_KEY` | none | OpenRouter `sk-or-` key; used when `TYPESAFE_API_KEY` is absent. |
 | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | none | Cloudflare Workers AI; used when no other provider key is present. `JEV_CLOUDFLARE_API_TOKEN` is honored first for separate credentials. |
 | `AI_GATEWAY_API_KEY` | none | Vercel AI Gateway; used when no other provider key is present. |
+| `OPENAI_API_KEY` | none | Native OpenAI Decisions; requires explicit `JEV_PROVIDER=openai`. |
 | `JEV_VERCEL_ZERO_DATA_RETENTION` | unset | `1` or `true` asks the Vercel AI Gateway to route only through its zero-data-retention providers; use with `JEV_PROVIDER=vercel`. See [Vercel](#vercel). |
-| `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, or `compatible` instead of auto-detection. |
-| `JEV_MCP_MODEL` | `jev-latest` | Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
+| `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, `compatible`, or `openai` instead of auto-detection. |
+| `JEV_MCP_MODEL` | `jev-latest`; `gpt-6-luna` for OpenAI | Pin a provider-supported model, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
 | `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
 | `JEV_API_BASE_URL` + `JEV_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `JEV_PROVIDER=compatible`. `JEV_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
 | `JEV_MCP_REQUEST_TIMEOUT_MS` | `60000` | Whole-request deadline in milliseconds, covering every attempt, on the fetch-based transports. |
 | `JEV_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on the fetch-based transports; retries happen only on 408, 409, 429, and 500 through 599. |
 | `JEV_OPENROUTER_BASE_URL` | `https://openrouter.ai/api` | Override the OpenRouter API root (the `/alpha/decisions` path is appended; a trailing slash is tolerated). |
 | `JEV_CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Override the Cloudflare API root (`/accounts/<id>/ai/run` is appended; a trailing slash is tolerated). |
+| `JEV_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Override the native OpenAI API root (`/decisions` is appended; a trailing slash is tolerated). |
 
 ### Transport resilience
 
-The fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpoint) retry only on the standard not-processed status set (408, 409, 429, and 500 through 599), with jittered exponential backoff, at most `JEV_MCP_MAX_ATTEMPTS` total attempts, all inside one `JEV_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry, non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error bodies on those transports are redacted, so a reflecting endpoint can never echo a configured key into MCP-visible errors. The only exception is the fixed OpenRouter token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Direct TypeSafe and Vercel calls use `@jkudish/jev-agent-tools`, whose direct fetch path avoids the SDK cancellation crash ([typesafe-sdk-js#2](https://github.com/typesafe-ai/typesafe-sdk-js/issues/2)); no retry or deadline uniformity is claimed for those two. Research and the original report: [issue #23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.
+The fetch-based transports (OpenRouter, Cloudflare, OpenAI, and the Jev-compatible endpoint) retry only on the standard not-processed status set (408, 409, 429, and 500 through 599), with jittered exponential backoff, at most `JEV_MCP_MAX_ATTEMPTS` total attempts, all inside one `JEV_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry, non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error bodies on those transports are redacted, so a reflecting endpoint can never echo a configured key into MCP-visible errors. The only exception is the fixed OpenRouter token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Direct TypeSafe and Vercel calls use `@jkudish/jev-agent-tools`, whose direct fetch path avoids the SDK cancellation crash ([typesafe-sdk-js#2](https://github.com/typesafe-ai/typesafe-sdk-js/issues/2)); no retry or deadline uniformity is claimed for those two. Research and the original report: [issue #23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.
+
+### OpenAI Decisions
+
+Select `JEV_PROVIDER=openai` and set `OPENAI_API_KEY` to run the twelve tools through [OpenAI's native Decisions API](https://developers.openai.com/api/docs/guides/decisions). The beta endpoint currently documents `gpt-6-luna`, which becomes the default model for this provider. This is separate from OpenRouter's Jev Decisions endpoint: requests use `input` and a named question array; Noul maps to `predicate`, and Choice and Score distributions are adapted back to each tool's validated shapes.
+
+```bash
+export JEV_PROVIDER=openai
+export OPENAI_API_KEY=your-openai-key
+npx -y @jkudish/jev-mcp
+```
+
+`jev_decide` supports direct image evidence through this provider. Other tool arguments stay text-only. See [the source-checkout example](examples/openai-decisions.md) for input, a dry run, image limits, and `recommendation.reason`. Refused or malformed judgments fail closed per tool. OpenAI's probability and confidence values are preserved as reported; TypeSafe calibration and confidence semantics are not assumed, so validate thresholds against examples from your application before automating actions.
 
 ### Vercel
 

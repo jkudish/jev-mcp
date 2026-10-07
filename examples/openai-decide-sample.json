@@ -1,0 +1,16 @@
+{
+  "decision": "Is there enough visual evidence to release this product?",
+  "evidence": "The supplied image is a synthetic one-pixel placeholder. It contains no product inspection evidence.",
+  "priorities": "Investigate when the image does not establish the product condition. Do not assume an unseen product is intact.",
+  "candidates": [
+    { "id": "release", "description": "Release a product whose intact condition is established." },
+    { "id": "hold", "description": "Hold a product whose visible damage is established." }
+  ],
+  "requirements": ["The image establishes the product condition."],
+  "images": [
+    {
+      "id": "sample",
+      "data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    }
+  ]
+}
