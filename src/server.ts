@@ -135,24 +135,34 @@ function defineTool<Input extends StandardSchemaWithJSON>(
 }
 
 /**
- * Advertise only `prefix`_* tools in tools/list while every registered alias
- * stays callable. The SDK has no public way to hide an enabled tool:
- * RegisteredTool.disable() also rejects calls ("Tool jev_x disabled"). So
- * this wraps the SDK's own tools/list handler, read through the Protocol
- * class's protected _getRequestHandler accessor. This is the only non-public
- * SDK access in the package, and discern-browser uses the same accessor
- * (verified on @modelcontextprotocol/server 2.3.x). test/aliases.test.mjs lists and calls
- * aliases through a real client over stdio and HTTP, so an SDK change that
- * breaks this fails CI instead of silently listing both prefixes.
+ * Hide the other prefix's alias names from tools/list while every registered
+ * name stays callable. Only the alias names are filtered, so tools an embedder
+ * registers on the returned server are listed normally. The SDK has no public
+ * way to hide an enabled tool: RegisteredTool.disable() also rejects calls
+ * ("Tool jev_x disabled"). So this wraps the SDK's own tools/list handler,
+ * read through the Protocol class's protected _getRequestHandler accessor. This
+ * is the only non-public SDK access in the package, and discern-browser uses
+ * the same accessor (verified on @modelcontextprotocol/server 2.3.x). If a
+ * future SDK removes it, the server still starts and lists both names, with
+ * one stderr line, rather than failing every connection.
+ * test/aliases.test.mjs lists and calls aliases through a real client over
+ * stdio and HTTP, so a change that breaks hiding fails CI.
  */
-function listOnlyPrefix(server: McpServer, prefix: ToolNames): void {
+let warnedUnhidden = false;
+function hideAliases(server: McpServer, hidden: ReadonlySet<string>): void {
   type ListHandler = (request: unknown, ctx: unknown) => Promise<ListToolsResult>;
   const original = (server.server as unknown as { _getRequestHandler?(method: string): ListHandler | undefined })._getRequestHandler?.("tools/list");
-  if (!original) throw new Error("MCP SDK tools/list handler not found; tool-name aliasing needs updating for this SDK version.");
+  if (typeof original !== "function") {
+    if (!warnedUnhidden) {
+      warnedUnhidden = true;
+      process.stderr.write("[discern-mcp] this MCP SDK version cannot hide tool aliases; listing both discern_* and jev_* names.\n");
+    }
+    return;
+  }
   server.server.removeRequestHandler("tools/list");
   server.server.setRequestHandler("tools/list", async (request, ctx) => {
     const result = await original(request, ctx);
-    return { ...result, tools: result.tools.filter((tool) => tool.name.startsWith(`${prefix}_`)) };
+    return { ...result, tools: result.tools.filter((tool) => !hidden.has(tool.name)) };
   });
 }
 
@@ -163,6 +173,9 @@ export interface CreateServerOptions {
 
 export function createServer(options: CreateServerOptions = {}): McpServer {
   const listed = options.toolNames ?? resolveToolNames();
+  // The option is typed, but JavaScript callers can pass anything; never build
+  // a server that silently lists no tools.
+  if (!TOOL_PREFIXES.includes(listed)) throw new Error('createServer: toolNames must be "discern" or "jev".');
   // The tool list is static (no change notifications are ever emitted), so it
   // advertises no listChanged capability and no client has a reason to hold a
   // subscriptions/listen stream open, which would occupy an HTTP slot idle.
@@ -177,7 +190,8 @@ export function createServer(options: CreateServerOptions = {}): McpServer {
       server.registerTool(name, { ...config, description }, handler(name));
     }
   }
-  listOnlyPrefix(server, listed);
+  const other = listed === "discern" ? "jev" : "discern";
+  hideAliases(server, new Set(toolDefinitions.map(({ suffix }) => `${other}_${suffix}`)));
   return server;
 }
 

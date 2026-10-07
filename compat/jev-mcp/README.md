@@ -6,4 +6,6 @@ This package keeps existing setups working during 1.x. Its `jev-mcp` bin runs `d
 
 To migrate, replace `@jkudish/jev-mcp` with `@jkudish/discern-mcp`, rename `JEV_*` variables to `DISCERN_*`, and update allowlists from `jev_*` to `discern_*`. See the [migration guide](https://github.com/jkudish/discern-mcp#migrating-from-jev-mcp).
 
+This package ships no agent skill; copy `skills/discern` from `@jkudish/discern-mcp` instead of the old `skills/jev`.
+
 This package, the `jev_*` tool names, and the `JEV_*` variables are removed in 2.0.

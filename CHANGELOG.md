@@ -2,7 +2,7 @@
 
 ## 1.0.0 (unreleased)
 
-jev-mcp is now **discern-mcp**: `@jkudish/discern-mcp`, bin `discern-mcp`. "Jev" names TypeSafe's model, and the server now also runs on OpenAI's Decisions API, so the package takes a provider-neutral name. Everything that worked in 0.14 keeps working through 1.x; the old names are removed in 2.0. See [Migrating from jev-mcp](README.md#migrating-from-jev-mcp).
+jev-mcp is now **discern-mcp**: `@jkudish/discern-mcp`, bin `discern-mcp`. "Jev" names TypeSafe's model, and the server now also runs on Cloudflare's Clef and OpenAI's Decisions API, so the package takes a provider-neutral name. The old package name, tool names, and environment variables keep working through 1.x and are removed in 2.0. Two things do change: `serverInfo.name` is `discern-mcp`, and the bundled agent skill moved from `skills/jev` to `skills/discern` (the compatibility package ships no skill). See [Migrating from jev-mcp](README.md#migrating-from-jev-mcp).
 
 - Breaking: the package is `@jkudish/discern-mcp` and the bin is `discern-mcp`. MCP `serverInfo.name` and stderr log lines say `discern-mcp`.
 - Tools are listed as `discern_*` (`discern_verify`, `discern_gate`, …). The matching `jev_*` names stay callable as hidden aliases. `DISCERN_TOOL_NAMES=jev` lists the `jev_*` names instead, with `discern_*` still callable; any other value fails at startup. Each result's `tool` field echoes the name that was called.

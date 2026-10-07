@@ -32,7 +32,7 @@
     "build": "tsc",
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/unit.test.mjs test/mock.test.mjs test/provider.test.mjs test/typesafe-abort-regression.test.mjs test/http.test.mjs test/exa-example.test.mjs test/server.test.mjs test/aliases.test.mjs test/compat.test.mjs test/hook-gate.test.mjs",
+    "test": "node --test test/unit.test.mjs test/mock.test.mjs test/provider.test.mjs test/typesafe-abort-regression.test.mjs test/http.test.mjs test/exa-example.test.mjs test/server.test.mjs test/aliases.test.mjs test/compat.test.mjs test/embed.test.mjs test/hook-gate.test.mjs",
     "test:e2e": "node --test test/e2e.test.mjs"
   },
   "keywords": [
