@@ -4,10 +4,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 <p align="center">
-  <img src=".github/discern-mcp-banner.png" alt="discern-mcp — Typed judgments with calibrated probabilities, as MCP tools. Runs on TypeSafe's Jev or OpenAI Decisions." />
+  <img src=".github/discern-mcp-banner.png" alt="discern-mcp — Typed judgments with calibrated probabilities, as MCP tools. Runs on TypeSafe's Jev, Cloudflare's Clef, or OpenAI Decisions." />
 </p>
 
-Fast, cheap, typed judgments as MCP tools, answered by TypeSafe's Jev model by default or by OpenAI's Decisions API.
+Fast, cheap, typed judgments as MCP tools, answered by TypeSafe's Jev model by default, or by Cloudflare's Clef or OpenAI's Decisions API.
 
 > **Renamed.** This package was `@jkudish/jev-mcp` before 1.0. Existing setups keep working through 1.x; see [Migrating from jev-mcp](#migrating-from-jev-mcp).
 
@@ -771,7 +771,7 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `DISCERN_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, `openai`, or `compatible` instead of auto-detection. `openai` is only ever selected this way. |
 | `DISCERN_OPENAI_API_KEY` or `OPENAI_API_KEY` | none | OpenAI Decisions key, `DISCERN_OPENAI_API_KEY` first; used only with `DISCERN_PROVIDER=openai`. |
 | `DISCERN_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Override the OpenAI API root (`/decisions` is appended). `OPENAI_BASE_URL` is deliberately ignored. |
-| `DISCERN_MCP_MODEL` | `jev-latest` | Pin a model: a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
+| `DISCERN_MCP_MODEL` | `jev-latest` | Pin a model: a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter; `clef` or `clef-flash` on Cloudflare. |
 | `DISCERN_TOOL_NAMES` | `discern` | Which tool names `tools/list` shows: `discern` (`discern_*`) or `jev` (`jev_*`, the 1.x compatibility names). Both sets stay callable. Any other value fails at startup. |
 | `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
 | `DISCERN_API_BASE_URL` + `DISCERN_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `DISCERN_PROVIDER=compatible`. `DISCERN_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
@@ -810,6 +810,11 @@ With `AI_GATEWAY_API_KEY` set, judgments run through the Vercel AI Gateway at `t
 ### Cloudflare
 
 With `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set (and no other provider key), judgments run through Cloudflare Workers AI at `typesafe/jev`, the single always-current alias. Usage tokens come back on every call. Cloudflare serves one alias rather than pinned versions, and pricing is listed in the Cloudflare dashboard. Direct TypeSafe remains the recommended default when you have several keys.
+
+The same provider runs Cloudflare's own [Clef decision models](https://blog.cloudflare.com/clef-decision-models/). Set `DISCERN_PROVIDER=cloudflare` and `DISCERN_MCP_MODEL=clef` (the larger model) or `clef-flash` (the low-latency one); any `@cf/` model id also passes through unchanged. Clef uses the same request and answer format as Jev, so every tool works unchanged and results report `model: "clef"` or `"clef-flash"`.
+
+- Clef is not Jev. It has its own calibration, so `auto_accept`, `review_at`, and other thresholds tuned on Jev need re-checking against your own labeled cases.
+- The API token needs Workers AI access. `clef-flash` answers in a few hundred milliseconds warm but can take several seconds on a cold start.
 
 ### OpenRouter
 
