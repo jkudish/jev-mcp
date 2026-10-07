@@ -12,7 +12,7 @@ Please do not open public issues for vulnerabilities. There is no bug bounty and
 
 ## Scope
 
-discern-mcp makes API calls to whichever provider is configured: TypeSafe (Jev) by default, or OpenRouter, Cloudflare, Vercel AI Gateway, OpenAI's Decisions API, or a Jev-compatible endpoint you point it at. It does not execute browser actions, read files, or make other network calls. Treat any text you send as leaving your environment: it goes to the configured provider, and to nowhere else.
+discern-mcp makes API calls to whichever provider is configured: TypeSafe (Jev) by default, or OpenRouter, Cloudflare Workers AI (Jev or Clef), Vercel AI Gateway, OpenAI's Decisions API, or a System One-compatible endpoint you point it at. It does not execute browser actions, read files, or make other network calls. Treat any text you send as leaving your environment: it goes to the configured provider, and to nowhere else.
 
 This policy also covers the `@jkudish/jev-mcp` compatibility package, which runs discern-mcp.
 
