@@ -164,7 +164,7 @@ test("decide caps stay sane", () => {
   assert.ok(Object.keys(DECIDE_ESCAPE_HATCHES).length === 3);
 });
 
-// jev_rerank / jev_compare / jev_extract helpers
+// discern_rerank / discern_compare / discern_extract helpers
 import {
   ASPECT_RELATIONS,
   COMPARE_RELATIONS,
@@ -205,7 +205,7 @@ test("COMPARE_RELATIONS and ASPECT_RELATIONS share the same three keys", () => {
   assert.match(ASPECT_RELATIONS.different_facts, /does not both|at least one/i);
 });
 
-// ── jev_review / jev_gate helpers ────────────────────────────────────────────
+// ── discern_review / discern_gate helpers ────────────────────────────────────────────
 
 test("resolvePolicyThresholds fills and validates the threshold pair", () => {
   assert.deepEqual(resolvePolicyThresholds(0.8), { autoAccept: 0.8, reviewAt: 0.5 });
@@ -279,7 +279,7 @@ test("worstAction picks the most severe action", () => {
   assert.equal(worstAction([]), "auto");
 });
 
-test("normalizeEvidence and hasNonEmptyEvidence match jev_verify shapes", () => {
+test("normalizeEvidence and hasNonEmptyEvidence match discern_verify shapes", () => {
   assert.deepEqual(normalizeEvidence("just text"), [{ id: "evidence", text: "just text" }]);
   assert.deepEqual(normalizeEvidence({ text: "single" }), [{ id: "evidence0", text: "single" }]);
   const multi = normalizeEvidence([

@@ -2,9 +2,9 @@
 // TypeSafe transport after headers while the response body is still streaming.
 // The child must exit normally after the cancellation is handled.
 import { createServer } from "node:http";
-import { askJev } from "../../dist/provider.js";
+import { askDiscern } from "../../dist/provider.js";
 
-process.env.JEV_PROVIDER = "typesafe";
+process.env.DISCERN_PROVIDER = "typesafe";
 process.env.TYPESAFE_API_KEY = "test-key";
 
 const http = createServer((req, res) => {
@@ -23,7 +23,7 @@ const controller = new AbortController();
 setTimeout(() => controller.abort(), 300); // well after headers, mid-body
 
 try {
-  await askJev({ state: "s" }, { q: { type: "noul", instructions: "?" } }, "jev-latest", controller.signal);
+  await askDiscern({ state: "s" }, { q: { type: "noul", instructions: "?" } }, "jev-latest", controller.signal);
   console.log("UNEXPECTED-RESOLVE");
 } catch (error) {
   console.log(`CAUGHT ${error?.constructor?.name}`);

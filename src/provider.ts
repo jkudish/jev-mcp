@@ -1,22 +1,23 @@
-// Jev transport: TypeSafe direct (default), OpenRouter Decisions, Cloudflare
+// Discern transport: TypeSafe Jev direct (default), OpenRouter Decisions, Cloudflare
 // Workers AI, Vercel AI Gateway, OpenAI Decisions (explicit only), or a
 // caller-supplied Jev-compatible System One endpoint. All but OpenAI speak the
 // {state, questions} / answers contract; the shared package translates OpenAI. Proxies add hops, so direct TypeSafe remains the recommended default.
 
-import { ask, openrouterJevModel, resolveTransport, type JevTransport, type JevTransportReply } from "@jkudish/jev-agent-tools";
+import "./env.js";
+import { ask, openrouterJevModel, resolveTransport, type DiscernTransport, type DiscernTransportReply } from "@jkudish/discern-agent-tools";
 import { isRecord } from "./lib.js";
 
-export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "openai" | "compatible";
+export type DiscernProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "openai" | "compatible";
 
 export interface AskResult {
   answers: Record<string, any>;
   usage: { input_tokens: number; output_tokens: number };
-  provider: JevProvider;
+  provider: DiscernProvider;
   model: string;
 }
 
-const X_TITLE = "jev-mcp";
-const REFERER = "https://github.com/jkudish/jev-mcp";
+const X_TITLE = "discern-mcp";
+const REFERER = "https://github.com/jkudish/discern-mcp";
 
 // Replace every occurrence of the secret so a reflecting endpoint cannot leak
 // it into MCP-visible error text; covering the bare form also covers the
@@ -37,9 +38,9 @@ const positiveIntFromEnv = (name: string, fallback: number): number => {
 };
 
 /** Whole-request deadline (all attempts), overridable for tests and tight hosts. */
-const REQUEST_TIMEOUT_MS = positiveIntFromEnv("JEV_MCP_REQUEST_TIMEOUT_MS", 60_000);
+const REQUEST_TIMEOUT_MS = positiveIntFromEnv("DISCERN_MCP_REQUEST_TIMEOUT_MS", 60_000);
 /** Total attempts per request, including the first; clamped to 1..6. */
-const MAX_ATTEMPTS = Math.min(6, Math.max(1, positiveIntFromEnv("JEV_MCP_MAX_ATTEMPTS", 3)));
+const MAX_ATTEMPTS = Math.min(6, Math.max(1, positiveIntFromEnv("DISCERN_MCP_MAX_ATTEMPTS", 3)));
 const BASE_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 4_000;
 /** Stream-checked ceiling for success and error bodies alike. */
@@ -120,7 +121,7 @@ function backoffDelay(attempt: number, deadline: Deadline): Promise<void> {
       cleanup();
       reject(
         deadline.timedOut()
-          ? new Error(`Jev request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline.`)
+          ? new Error(`Discern request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline.`)
           : deadline.signal.reason,
       );
     };
@@ -151,7 +152,7 @@ async function readBodyBounded(response: Response, deadline: Deadline): Promise<
     onAbort = () =>
       reject(
         deadline.timedOut()
-          ? new Error(`Jev request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline while reading the response.`)
+          ? new Error(`Discern request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline while reading the response.`)
           : deadline.signal.reason,
       );
   });
@@ -174,7 +175,7 @@ async function readBodyBounded(response: Response, deadline: Deadline): Promise<
     // does, so deadline expiry reads as a deadline, not "operation aborted".
     if (deadline.signal.aborted) {
       throw deadline.timedOut()
-        ? new Error(`Jev request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline while reading the response.`)
+        ? new Error(`Discern request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline while reading the response.`)
         : deadline.signal.reason;
     }
     throw error;
@@ -223,7 +224,7 @@ async function fetchWithResilience(url: string, init: RequestInit, deadline: Dea
       response = await fetch(url, { ...init, signal: deadline.signal });
     } catch (error) {
       if (deadline.timedOut()) {
-        throw new Error(`Jev request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline.`);
+        throw new Error(`Discern request exceeded the ${REQUEST_TIMEOUT_MS}ms deadline.`);
       }
       throw error; // caller cancellation or network failure: never re-sent
     }
@@ -237,15 +238,15 @@ async function fetchWithResilience(url: string, init: RequestInit, deadline: Dea
   }
 }
 
-function resolve(env: NodeJS.ProcessEnv): JevProvider {
-  const explicit = (env.JEV_PROVIDER ?? "auto").toLowerCase();
-  const hasCompatible = Boolean(env.JEV_API_KEY && env.JEV_API_BASE_URL);
+function resolve(env: NodeJS.ProcessEnv): DiscernProvider {
+  const explicit = (env.DISCERN_PROVIDER || "auto").toLowerCase();
+  const hasCompatible = Boolean(env.DISCERN_API_KEY && env.DISCERN_API_BASE_URL);
   if (explicit === "compatible") {
-    const missing = ["JEV_API_KEY", "JEV_API_BASE_URL"].filter((name) => !env[name]);
+    const missing = ["DISCERN_API_KEY", "DISCERN_API_BASE_URL"].filter((name) => !env[name]);
     if (missing.length > 0) {
       throw new Error(
-        `JEV_PROVIDER=compatible but ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not set. ` +
-          "JEV_MCP_MODEL is optional and defaults to jev-latest.",
+        `DISCERN_PROVIDER=compatible but ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not set. ` +
+          "DISCERN_MCP_MODEL is optional and defaults to jev-latest.",
       );
     }
     return "compatible";
@@ -253,12 +254,13 @@ function resolve(env: NodeJS.ProcessEnv): JevProvider {
   // The published package owns the four built-in credential rules and order.
   if ((explicit === "auto" || explicit === "") && hasCompatible &&
       !env.TYPESAFE_API_KEY && !/^sk-or-/.test(env.OPENROUTER_API_KEY ?? "") &&
-      !((env.JEV_CLOUDFLARE_API_TOKEN || env.CLOUDFLARE_API_TOKEN) && env.CLOUDFLARE_ACCOUNT_ID) &&
+      !((env.DISCERN_CLOUDFLARE_API_TOKEN || env.CLOUDFLARE_API_TOKEN) && env.CLOUDFLARE_ACCOUNT_ID) &&
       !env.AI_GATEWAY_API_KEY) return "compatible";
-  return resolveTransport({ ...env, JEV_PROVIDER: explicit || "auto" }).name as JevProvider;
+  // The shared package treats an unset or empty DISCERN_PROVIDER as auto.
+  return resolveTransport(env).name as DiscernProvider;
 }
 
-export async function askJev(
+export async function askDiscern(
   state: unknown,
   questions: Record<string, unknown>,
   model: string,
@@ -269,9 +271,9 @@ export async function askJev(
   if (provider === "typesafe" || provider === "vercel" || provider === "openai") {
     // Keep the raw envelope for MCP's per-judgment invalid_response behavior:
     // the shared package rejects a whole batch if even one answer is invalid.
-    const builtin = resolveTransport({ ...process.env, JEV_PROVIDER: process.env.JEV_PROVIDER || "auto" });
-    let reply: JevTransportReply | undefined;
-    const transport: JevTransport = {
+    const builtin = resolveTransport(process.env);
+    let reply: DiscernTransportReply | undefined;
+    const transport: DiscernTransport = {
       name: builtin.name,
       async ask(input) {
         try {
@@ -319,7 +321,7 @@ export async function askJev(
     const slug = openrouterJevModel(model);
     const deadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetchWithResilience(apiUrl(process.env.JEV_OPENROUTER_BASE_URL || "https://openrouter.ai/api", "/alpha/decisions"), {
+      const response = await fetchWithResilience(apiUrl(process.env.DISCERN_OPENROUTER_BASE_URL || "https://openrouter.ai/api", "/alpha/decisions"), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
@@ -361,10 +363,10 @@ export async function askJev(
   if (provider === "compatible") {
     const deadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetchWithResilience(process.env.JEV_API_BASE_URL!, {
+      const response = await fetchWithResilience(process.env.DISCERN_API_BASE_URL!, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env.JEV_API_KEY}`,
+          Authorization: `Bearer ${process.env.DISCERN_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ model, state, questions }),
@@ -414,8 +416,8 @@ export async function askJev(
   // Cloudflare Workers AI wraps the same contract in {model, input} and the
   // v4 {result, success} envelope. Single alias; no version pinning.
   const cfSlug = model.startsWith("typesafe/") ? model : `typesafe/${model === "jev-latest" ? "jev" : model}`;
-  const cfToken = process.env.JEV_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
-  const cfBase = process.env.JEV_CLOUDFLARE_BASE_URL || "https://api.cloudflare.com/client/v4";
+  const cfToken = process.env.DISCERN_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
+  const cfBase = process.env.DISCERN_CLOUDFLARE_BASE_URL || "https://api.cloudflare.com/client/v4";
   const cfDeadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
   let cfBody: Record<string, any>;
   let cfStatus = 0;
@@ -423,7 +425,7 @@ export async function askJev(
     const cfResponse = await fetchWithResilience(apiUrl(cfBase, `/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run`), {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.JEV_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN}`,
+        Authorization: `Bearer ${process.env.DISCERN_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ model: cfSlug, input: { state, questions } }),
