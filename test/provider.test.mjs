@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ask } from "@jkudish/jev-agent-tools";
+import { ask } from "@jkudish/discern-agent-tools";
 
 test("shared wire validator distinguishes a malformed judgment from a failed request", async () => {
   const input = {
