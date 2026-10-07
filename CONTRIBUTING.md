@@ -16,10 +16,12 @@ Node.js 22 or newer. TypeScript, ESM; runtime dependencies include the MCP SDK, 
 
 ```bash
 npm test            # unit tests, offline
-npm run test:e2e    # live API tests, requires TYPESAFE_API_KEY
+npm run test:e2e    # live tests; TYPESAFE_API_KEY and/or OPENAI_API_KEY
 ```
 
 Unit tests cover the pure helpers in `src/lib.ts` and run everywhere, including CI. End-to-end tests spawn the built server over stdio and call the tools against the live TypeSafe API. They run in CI only when a `TYPESAFE_API_KEY` secret is configured, and locally only when the variable is set.
+
+The OpenAI Decisions smoke also spawns the built server and exercises text, an inline image, and requirement checks. It runs only when `OPENAI_API_KEY` is set; otherwise it skips. Offline tests use a local HTTP stand-in to validate the native request and response contract across all twelve tools.
 
 Both suites must pass before a pull request can merge. If you add behavior, add the test that would have caught its absence.
 

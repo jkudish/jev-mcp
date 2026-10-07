@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Opt-in native OpenAI Decisions through `JEV_PROVIDER=openai`, with named predicate/choice/score adaptation, per-judgment refusal handling, and the existing fetch resilience. Auto-selection still chooses Jev carriers only.
+- `jev_decide`: optional inline image evidence on OpenAI, returned image metadata with SHA-256 hashes, and a `recommendation.reason` summary of validated judgments on every provider. Includes a source-checkout example.
+
 ## 0.14.1
 
 - OpenRouter: token-limit rejections report `OpenRouter decisions API 400 (max_tokens_exceeded)`; unknown error types and all upstream text stay hidden. Via [#57](https://github.com/jkudish/jev-mcp/pull/57) by [@nicolas-found42](https://github.com/nicolas-found42).

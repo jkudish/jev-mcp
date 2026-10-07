@@ -1,12 +1,12 @@
-// Jev transport: TypeSafe direct (default), OpenRouter Decisions, Cloudflare
-// Workers AI, or a caller-supplied Jev-compatible System One endpoint. All
-// speak the {state, questions} / answers contract; URL, auth, and model slugs
-// differ. Proxies add hops, so direct TypeSafe remains the recommended default.
+// Jev transports speak the {state, questions} / answers contract; the opt-in
+// native OpenAI Decisions adapter translates its input/questions/answers wire.
+// Direct TypeSafe remains the recommended default for Jev.
 
 import { ask, openrouterJevModel, resolveTransport, type JevTransport, type JevTransportReply } from "@jkudish/jev-agent-tools";
 import { isRecord } from "./lib.js";
+import { decisionImageMetadata, openAIInput, openAIQuestions, openAIReply, type DecisionImage } from "./openai.js";
 
-export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible";
+export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible" | "openai";
 
 export interface AskResult {
   answers: Record<string, any>;
@@ -27,7 +27,7 @@ function redactSecret(text: string, secret: string): string {
 
 // ── Transport resilience ─────────────────────────────────────────────────────
 // Research and the original report: GitHub issue #23 by oppih. Applies to the
-// fetch-based transports (openrouter, cloudflare, compatible); the typesafe
+// fetch-based transports (openrouter, cloudflare, compatible, openai); the typesafe
 // and vercel branches go through SDK-owned transports whose retry and timeout
 // semantics are theirs, so no uniformity is claimed for those.
 
@@ -239,6 +239,15 @@ async function fetchWithResilience(url: string, init: RequestInit, deadline: Dea
 
 function resolve(env: NodeJS.ProcessEnv): JevProvider {
   const explicit = (env.JEV_PROVIDER ?? "auto").toLowerCase();
+  // OpenAI serves a different decision model, not Jev. Select it explicitly
+  // so a general OPENAI_API_KEY never changes the existing carrier precedence.
+  if (explicit === "openai") {
+    if (!env.OPENAI_API_KEY) throw new Error("JEV_PROVIDER=openai but OPENAI_API_KEY is not set.");
+    return "openai";
+  }
+  if (!["auto", "", "typesafe", "openrouter", "cloudflare", "vercel", "compatible"].includes(explicit)) {
+    throw new Error("Unknown JEV_PROVIDER; choose typesafe, openrouter, cloudflare, vercel, compatible, openai, or auto.");
+  }
   const hasCompatible = Boolean(env.JEV_API_KEY && env.JEV_API_BASE_URL);
   if (explicit === "compatible") {
     const missing = ["JEV_API_KEY", "JEV_API_BASE_URL"].filter((name) => !env[name]);
@@ -263,8 +272,41 @@ export async function askJev(
   questions: Record<string, unknown>,
   model: string,
   signal?: AbortSignal,
+  images: readonly DecisionImage[] = [],
 ): Promise<AskResult> {
   const provider = resolve(process.env);
+  if (images.length > 0 && provider !== "openai") {
+    throw new Error("Image evidence requires JEV_PROVIDER=openai.");
+  }
+
+  if (provider === "openai") {
+    decisionImageMetadata(images);
+    const request = { model, input: openAIInput(state, images), questions: openAIQuestions(questions) };
+    const deadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetchWithResilience(apiUrl(process.env.JEV_OPENAI_BASE_URL || "https://api.openai.com/v1", "/decisions"), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      }, deadline);
+      const bodyText = await readBodyBounded(response, deadline);
+      if (!response.ok) throw new Error(`OpenAI decisions API ${response.status}`);
+      let body: unknown;
+      try { body = JSON.parse(bodyText); }
+      catch { throw new Error("OpenAI decisions API returned an unparseable response."); }
+      return { ...openAIReply(body, questions), provider };
+    } catch (error) {
+      if (deadline.timedOut()) throw new Error(`OpenAI decisions API exceeded the ${REQUEST_TIMEOUT_MS}ms deadline.`);
+      if (deadline.signal.aborted) throw new Error("OpenAI decisions API request cancelled.");
+      if (error instanceof Error && /^(OpenAI decisions API \d{3}|OpenAI decisions API returned an (invalid|unparseable) response\.)$/.test(error.message)) throw error;
+      if (error instanceof Error && /^Response exceeded \d+ bytes after reading \d+; aborting the read\.$/.test(error.message)) {
+        throw new Error("OpenAI decisions API response exceeded the size limit.");
+      }
+      throw new Error("OpenAI decisions API request failed.");
+    } finally {
+      deadline.dispose();
+    }
+  }
 
   if (provider === "typesafe" || provider === "vercel") {
     // Keep the raw envelope for MCP's per-judgment invalid_response behavior:
