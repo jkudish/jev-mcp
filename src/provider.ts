@@ -19,9 +19,10 @@ export interface AskResult {
   model: string;
 }
 
+// Positive integers only; the shared package clamps the deadline to what a timer can hold.
 const positiveInt = (value: string | undefined): number | undefined => {
   const raw = Number(value);
-  return Number.isInteger(raw) && raw > 0 ? raw : undefined;
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : undefined;
 };
 
 const TRANSPORT_FAILURES = new Set(["request_failed", "rate_limited", "unavailable", "timeout", "configuration_error"]);
