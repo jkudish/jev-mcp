@@ -153,7 +153,7 @@ The server itself speaks plain HTTP: terminate TLS at a reverse proxy or load ba
 
 The `discern-mcp` bin boots a transport when run; importing the package never does. To run the tools in-process (an agent hook, a larger server, a test harness):
 
-- `import { createServer } from "@jkudish/discern-mcp"` — side-effect-free: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all twelve, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/discern-mcp/server` is an explicit alias for the same entry.
+- `import { createServer } from "@jkudish/discern-mcp"` — starts no transport: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all twelve, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/discern-mcp/server` is an explicit alias for the same entry.
 - `MODEL` is exported alongside it, resolved from `DISCERN_MCP_MODEL` at import time (default `jev-latest`), so embedders report the same model the CLI serves.
 - `createServer({ toolNames })` chooses which tool names `tools/list` shows (`"discern"` or `"jev"`); without it, `DISCERN_TOOL_NAMES` decides via the exported `resolveToolNames()`. Importing the module applies the `JEV_*` environment aliases to `process.env`, and throws if a `JEV_` and `DISCERN_` pair conflicts.
 - `@jkudish/discern-mcp/bin` is the bin entry; importing it starts a transport, exactly like running `discern-mcp`.
@@ -839,7 +839,7 @@ One compatibility note: the default model is `jev-latest`, and not every endpoin
 
 ## Migrating from jev-mcp
 
-jev-mcp became discern-mcp at 1.0.0. "Jev" is TypeSafe's model, and the server now also runs on OpenAI's Decisions API, so the package takes a provider-neutral name. Nothing breaks during 1.x: the old package name, tool names, and environment variables all keep working. They are removed in 2.0.
+jev-mcp became discern-mcp at 1.0.0. "Jev" is TypeSafe's model, and the server now also runs on Cloudflare's Clef and OpenAI's Decisions API, so the package takes a provider-neutral name. During 1.x the old package name, tool names, and environment variables all keep working; they are removed in 2.0. Two things change immediately: `serverInfo.name` is `discern-mcp`, and the agent skill moved from `skills/jev` to `skills/discern` in the `@jkudish/discern-mcp` package.
 
 To migrate:
 

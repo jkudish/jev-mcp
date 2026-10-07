@@ -2,7 +2,7 @@
 // (discern_* listed, jev_* callable, or the reverse with
 // DISCERN_TOOL_NAMES=jev), result `tool` echo, and JEV_* env aliases.
 //
-// tools/list filtering wraps a private SDK handler map (listOnlyPrefix in
+// tools/list filtering wraps the SDK handler through a protected accessor (hideAliases in
 // src/server.ts). These tests list and call through stdio and stateless HTTP,
 // so an SDK change that breaks the wrapper fails here.
 import assert from "node:assert/strict";
