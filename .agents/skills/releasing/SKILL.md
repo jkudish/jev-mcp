@@ -2,15 +2,25 @@
 name: releasing
 description: >
   Releases this package to npm and GitHub. Use when cutting a new version of
-  @jkudish/jev-mcp, bumping versions, writing changelogs, publishing to npm,
-  tagging releases, or troubleshooting a publish that did not go as expected.
+  @jkudish/discern-mcp (or its @jkudish/jev-mcp compatibility package),
+  bumping versions, writing changelogs, publishing to npm, tagging releases,
+  or troubleshooting a publish that did not go as expected.
 ---
 
-# Releasing @jkudish/jev-mcp
+# Releasing @jkudish/discern-mcp
 
 Two destinations, one gate. The agent stages the npm release; only Joey can
 approve it (passkey, npmjs.com Staged Packages tab). Everything else is
 mechanical and exact.
+
+This repository publishes two packages:
+
+- `@jkudish/discern-mcp`: the root package. This is the real server.
+- `@jkudish/jev-mcp`: the 1.x compatibility package in `compat/jev-mcp/`. It
+  depends on `@jkudish/discern-mcp` and only sets `DISCERN_TOOL_NAMES=jev`.
+  Release it only when its own files or its dependency range change, and
+  always after the discern-mcp version it depends on is live. Run its steps
+  from `compat/jev-mcp/`. It has no lockfile and no build.
 
 ## Sequence
 
@@ -28,9 +38,24 @@ mechanical and exact.
    which may have moved: `git tag -a v<version> <sha> -m "v<version>: summary"`
    then `git push origin v<version>`.
 7. Create the GitHub release from that tag with the changelog section as notes
-   and the install command `npx -y @jkudish/jev-mcp`.
-8. Verify: `npm view @jkudish/jev-mcp version --prefer-online` returns the new
-   version and the release page renders.
+   and the install command `npx -y @jkudish/discern-mcp`.
+8. Verify: `npm view @jkudish/discern-mcp version --prefer-online` returns the
+   new version and the release page renders.
+
+## 1.0.0 (the rename) only
+
+- `@jkudish/discern-mcp` is a brand-new package, so 1.0.0 must be published
+  interactively by Joey (see the first rule below). It depends on
+  `@jkudish/discern-agent-tools` 1.0.0, which must be live first.
+- Before step 2, refresh the lockfile against the published
+  `@jkudish/discern-agent-tools`; until then it still points at
+  jev-agent-tools and `npm ci` fails.
+- `@jkudish/jev-mcp` 1.0.0 is an existing package, so it stages normally,
+  after `@jkudish/discern-mcp` 1.0.0 is live.
+- Rename the GitHub repository from jkudish/jev-mcp to jkudish/discern-mcp at
+  release. Docs already link to the new URL; GitHub redirects the old one.
+- `npm deprecate` of older `@jkudish/jev-mcp` versions is Joey's call, never
+  an agent's.
 
 ## Rules and traps
 
@@ -47,11 +72,14 @@ mechanical and exact.
 - The npm package README comes from the tarball at stage time, not from
   GitHub HEAD.
 - Never republish a version that already exists on the registry.
+- The root `files` list must never include `compat/`; `test/compat.test.mjs`
+  checks this.
 
 ## Verification checklist
 
 - CI green on the release commit.
 - `npx npm@latest stage list` showed the staged version and shasum.
-- Joey approved; `npm view @jkudish/jev-mcp version --prefer-online` returns it.
+- Joey approved; `npm view @jkudish/discern-mcp version --prefer-online`
+  returns it.
 - The tag points at the packed sha and the GitHub release exists on that tag.
-- Repository: https://github.com/jkudish/jev-mcp
+- Repository: https://github.com/jkudish/discern-mcp
