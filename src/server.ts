@@ -17,7 +17,7 @@
 //   discern_review   — score a proposed diff before the task is called done
 //   discern_gate     — review a patch and verify completion claims in one call
 
-import "./env.js";
+import { discernEnv } from "./env.js";
 import { McpServer, type ListToolsResult, type StandardSchemaWithJSON, type ToolCallback } from "@modelcontextprotocol/server";
 import { choice, noul, score } from "@typesafe-ai/sdk";
 import { z } from "zod";
@@ -85,9 +85,11 @@ import {
   worstAction,
 } from "./lib.js";
 
-// Resolved from DISCERN_MCP_MODEL at import time; exported so the CLI entry can
-// report the same model it serves.
-export const MODEL = process.env.DISCERN_MCP_MODEL || "jev-latest";
+// Resolved from DISCERN_MCP_MODEL (or its legacy JEV_MCP_MODEL alias) at import
+// time; exported so the CLI entry can report the same model it serves. `latest`
+// is each carrier's current default model. This read never throws; a
+// conflicting JEV_/DISCERN_ pair is reported by createServer().
+export const MODEL = process.env.DISCERN_MCP_MODEL || process.env.JEV_MCP_MODEL || "latest";
 
 // Resolved at runtime so the MCP handshake version always matches the package.
 const { version: packageVersion } = createRequire(import.meta.url)("../package.json") as { version: string };
@@ -102,7 +104,7 @@ export type ToolNames = "discern" | "jev";
 const TOOL_PREFIXES: readonly ToolNames[] = ["discern", "jev"];
 
 /** Reads DISCERN_TOOL_NAMES (unset or empty means `discern`); any other value is a startup error. */
-export function resolveToolNames(env: NodeJS.ProcessEnv = process.env): ToolNames {
+export function resolveToolNames(env: Record<string, string | undefined> = discernEnv()): ToolNames {
   const value = env.DISCERN_TOOL_NAMES || "discern";
   if (value === "discern" || value === "jev") return value;
   // Fixed string: the rejected value is never echoed.
@@ -172,7 +174,10 @@ export interface CreateServerOptions {
 }
 
 export function createServer(options: CreateServerOptions = {}): McpServer {
-  const listed = options.toolNames ?? resolveToolNames();
+  // Reading the normalized environment surfaces a JEV_/DISCERN_ conflict here,
+  // when the server is built, not at import.
+  const env = discernEnv();
+  const listed = options.toolNames ?? resolveToolNames(env);
   // The option is typed, but JavaScript callers can pass anything; never build
   // a server that silently lists no tools.
   if (!TOOL_PREFIXES.includes(listed)) throw new Error('createServer: toolNames must be "discern" or "jev".');

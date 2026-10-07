@@ -7,6 +7,7 @@ import { createServer as createNodeServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { createMcpHandler, type McpServer } from "@modelcontextprotocol/server";
+import { discernEnv } from "./env.js";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
@@ -36,7 +37,7 @@ function isLoopbackOrigin(origin: string | undefined): boolean {
   }
 }
 
-export async function serveHttp(factory: () => McpServer, env: NodeJS.ProcessEnv = process.env) {
+export async function serveHttp(factory: () => McpServer, env: Record<string, string | undefined> = discernEnv()) {
   // Loopback by default: binding a public interface is an explicit act.
   const host = env.HOST || "127.0.0.1";
   const port = Number(env.PORT || 8080);

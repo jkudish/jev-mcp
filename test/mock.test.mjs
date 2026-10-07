@@ -169,7 +169,7 @@ test("compatible auto-selection tolerates an incomplete Cloudflare credential pa
     }, (port) => compatibleEnv(port, { DISCERN_PROVIDER: "auto", TYPESAFE_API_KEY: "", CLOUDFLARE_API_TOKEN: "incomplete" }));
 });
 
-test("compatible provider rejects a malformed response", async () => {
+test("compatible provider fails every judgment closed on a malformed response", async () => {
   await withMock(
     null,
     async (client) => {
@@ -177,8 +177,10 @@ test("compatible provider rejects a malformed response", async () => {
         name: "discern_verify",
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
-      assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /invalid response/i);
+      // Envelope problems fail every judgment closed instead of the whole call,
+      // the same on every carrier.
+      assert.notEqual(result.isError, true);
+      assert.equal(payload(result).results[0].status, "invalid_response");
     },
     compatibleEnv,
   );
@@ -195,7 +197,7 @@ test("compatible provider reports non-2xx status without upstream body text", as
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /Jev-compatible endpoint 401/);
+      assert.match(result.content[0].text, /^Discern provider compatible: request failed \(HTTP 401\)$/);
       assert.ok(!result.content[0].text.includes("Unauthorized client"));
       assert.ok(!result.content[0].text.includes("compatible-test-key"));
     },
@@ -270,7 +272,7 @@ test("compatible provider never retries an unparseable 200 body", async () => {
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /invalid response/i);
+      assert.match(result.content[0].text, /Jev-compatible endpoint returned an unparseable response/);
       assert.equal(requests.length, 1);
     },
     compatibleEnv,
@@ -306,7 +308,7 @@ test("a hanging endpoint hits the request deadline without retrying", async () =
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /exceeded the 200ms deadline/);
+      assert.match(result.content[0].text, /no answer within the 200ms deadline/);
       assert.equal(requests.length, 1);
     },
     (port) => compatibleEnv(port, { DISCERN_MCP_REQUEST_TIMEOUT_MS: "200" }),
@@ -385,7 +387,7 @@ test("deadline expiry during retry backoff surfaces promptly without another att
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /exceeded the 300ms deadline/);
+      assert.match(result.content[0].text, /no answer within the 300ms deadline/);
       assert.ok(requests.length <= 2, `expected at most 2 requests, saw ${requests.length}`);
       assert.ok(Date.now() - started < 1000, "deadline should cut the backoff sleep short");
     },
@@ -403,7 +405,7 @@ test("a stalled response body hits the deadline while reading", async () => {
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /exceeded the 300ms deadline while reading the response/);
+      assert.match(result.content[0].text, /no answer within the 300ms deadline/);
       assert.equal(requests.length, 1);
     },
     (port) => compatibleEnv(port, { DISCERN_MCP_REQUEST_TIMEOUT_MS: "300" }),
@@ -471,7 +473,7 @@ test("openrouter provider keeps a malformed 200 body out of client-visible error
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /OpenRouter decisions API 200 returned an unparseable response/);
+      assert.match(result.content[0].text, /OpenRouter decisions API returned an unparseable response/);
       assert.ok(!result.content[0].text.includes("sk-or-v1-echo-secret"));
       assert.ok(!result.content[0].text.includes("garbage"));
     },
@@ -488,13 +490,13 @@ test("openrouter token budget error is diagnosable without reflected secrets", a
   const env = (port) => ({ DISCERN_PROVIDER: "openrouter", OPENROUTER_API_KEY: "sk-or-v1-synthetic-secret", DISCERN_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}/` });
   const message = (text) => JSON.stringify({ error: { message: text, code: 400 } });
   for (const [raw, expected] of [
-    [message('HTTP 400: {"detail":{"error_type":"max_tokens_exceeded","message":"Bearer synthetic-secret"}}'), "OpenRouter decisions API 400 (max_tokens_exceeded)"],
-    [message('HTTP 400: {"detail":{"error_type":"unknown_secret_type","message":"Bearer synthetic-secret"}}'), "OpenRouter decisions API 400"],
-    [message('HTTP 400: {"detail":{"error_type":"max_tokens_exceeded synthetic-secret"}}'), "OpenRouter decisions API 400"],
-    [message('Model typesafe/synthetic-secret does not exist'), "OpenRouter decisions API 400"],
-    [message('HTTP 400: {not json synthetic-secret'), "OpenRouter decisions API 400"],
-    [JSON.stringify({ error: { message: { error_type: "max_tokens_exceeded", secret: "synthetic-secret" }, code: 400 } }), "OpenRouter decisions API 400"],
-    [JSON.stringify({ detail: { error_type: "max_tokens_exceeded" } }), "OpenRouter decisions API 400"],
+    [message('HTTP 400: {"detail":{"error_type":"max_tokens_exceeded","message":"Bearer synthetic-secret"}}'), "Discern provider openrouter: request failed (HTTP 400, max_tokens_exceeded)"],
+    [message('HTTP 400: {"detail":{"error_type":"unknown_secret_type","message":"Bearer synthetic-secret"}}'), "Discern provider openrouter: request failed (HTTP 400)"],
+    [message('HTTP 400: {"detail":{"error_type":"max_tokens_exceeded synthetic-secret"}}'), "Discern provider openrouter: request failed (HTTP 400)"],
+    [message('Model typesafe/synthetic-secret does not exist'), "Discern provider openrouter: request failed (HTTP 400)"],
+    [message('HTTP 400: {not json synthetic-secret'), "Discern provider openrouter: request failed (HTTP 400)"],
+    [JSON.stringify({ error: { message: { error_type: "max_tokens_exceeded", secret: "synthetic-secret" }, code: 400 } }), "Discern provider openrouter: request failed (HTTP 400)"],
+    [JSON.stringify({ detail: { error_type: "max_tokens_exceeded" } }), "Discern provider openrouter: request failed (HTTP 400)"],
   ]) {
     await withMock({}, async (client, requests) => {
       const result = await client.callTool({ name: "discern_verify", arguments: { claims: ["ready"], evidence: "tests pass" } });
@@ -515,7 +517,7 @@ test("openrouter provider redacts a reflected key from error bodies", async () =
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /OpenRouter decisions API 401/);
+      assert.match(result.content[0].text, /request failed \(HTTP 401\)/);
       assert.ok(!result.content[0].text.includes("sk-or-v1-echo-secret"));
       assert.ok(!result.content[0].text.includes("invalid key"));
       assert.equal(requests[0].path, "/alpha/decisions");
@@ -556,8 +558,11 @@ test("openrouter provider uses the latest alias and reports the effective model"
       answers,
       async (client) => {
         const result = await client.callTool({ name: "discern_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } });
-        assert.equal(result.isError, true);
-        assert.match(result.content[0].text, /OpenRouter decisions API 200 returned an invalid model/);
+        // A malformed model fails the judgments closed and never becomes the reported model.
+        assert.notEqual(result.isError, true);
+        const body = JSON.parse(result.content[0].text);
+        assert.equal(body.results[0].status, "invalid_response");
+        assert.equal(body.model, "latest");
       },
       (port) => ({ DISCERN_PROVIDER: "openrouter", OPENROUTER_API_KEY: "sk-or-test", DISCERN_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}` }),
       { model: malformed },
@@ -595,7 +600,7 @@ test("cloudflare provider redacts the token on every error path", async () => {
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /Cloudflare AI run 200/);
+      assert.match(result.content[0].text, /Cloudflare AI run did not succeed/);
       assert.ok(!result.content[0].text.includes("cf-echo-token"));
       assert.ok(!result.content[0].text.includes("bad token"));
       assert.match(requests[0].path, /\/accounts\/test-account\/ai\/run$/);
@@ -612,9 +617,10 @@ test("cloudflare provider redacts the token on every error path", async () => {
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /Cloudflare AI run 200 did not complete/);
+      assert.match(result.content[0].text, /Cloudflare AI run did not complete/);
       assert.ok(!result.content[0].text.includes("cf-echo-token"));
-      assert.ok(!result.content[0].text.includes("failed"));
+      // Only the fixed message: the upstream state ("failed") and errors never appear.
+      assert.equal(result.content[0].text, "Discern provider cloudflare: request failed (Cloudflare AI run did not complete (response omitted))");
     },
     cfEnv,
     { raw: JSON.stringify({ success: true, errors: ["token cf-echo-token echoed"], result: { state: "failed", result: {} } }) },
@@ -657,7 +663,7 @@ test("typesafe provider cancellation aborts promptly through the SDK without cra
 });
 
 test("compatible provider rejects a non-object answers envelope and fails closed on an empty one", async () => {
-  // An array answers envelope is rejected at the transport boundary.
+  // An array answers envelope fails every judgment closed.
   await withMock(
     [],
     async (client) => {
@@ -665,8 +671,10 @@ test("compatible provider rejects a non-object answers envelope and fails closed
         name: "discern_verify",
         arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
       });
-      assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /invalid response/i);
+      // Envelope problems fail every judgment closed instead of the whole call,
+      // the same on every carrier.
+      assert.notEqual(result.isError, true);
+      assert.equal(payload(result).results[0].status, "invalid_response");
     },
     compatibleEnv,
   );
@@ -890,13 +898,13 @@ test("compatible provider fails closed in the tools for answers malformed per qu
       compatibleEnv,
     );
   }
-  // Envelope-level problems stay at the transport: model must be a string.
+  // An envelope-level problem (a non-string model) fails every judgment closed.
   await withMock(
     () => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }),
     async (client) => {
       const result = await client.callTool({ name: "discern_review", arguments: REVIEW_ARGS });
-      assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /model must be absent or a string/);
+      assert.notEqual(result.isError, true);
+      assert.equal(payload(result).status, "invalid_response");
     },
     compatibleEnv,
     { model: 123 },
@@ -905,11 +913,21 @@ test("compatible provider fails closed in the tools for answers malformed per qu
 
 test("compatible provider rejects malformed or incomplete usage", async () => {
   const cases = [
-    { input_tokens: 10 }, // output_tokens missing
     { input_tokens: "10", output_tokens: 5 }, // non-numeric
     { input_tokens: -1, output_tokens: 5 }, // negative
     [], // not an object
   ];
+  // A missing counter counts as zero, the shared rule for every carrier.
+  await withMock(
+    (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
+    async (client) => {
+      const body = payload(await client.callTool({ name: "discern_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } }));
+      assert.equal(body.results[0].verdict, "verified");
+      assert.deepEqual(body.usage, { input_tokens: 10, output_tokens: 0 });
+    },
+    compatibleEnv,
+    { usage: { input_tokens: 10 } },
+  );
   for (const usage of cases) {
     await withMock(
       (request) => ({ relation_claim0: pick("supports", Object.keys(request.questions.relation_claim0.criteria)) }),
@@ -918,8 +936,11 @@ test("compatible provider rejects malformed or incomplete usage", async () => {
           name: "discern_verify",
           arguments: { claims: ["The patch is ready"], evidence: "The tests pass" },
         });
-        assert.equal(result.isError, true);
-        assert.match(result.content[0].text, /usage must report finite non-negative input_tokens and output_tokens/);
+        // Malformed usage invalidates the call's judgments; usage is never credited.
+        assert.notEqual(result.isError, true);
+        const body = payload(result);
+        assert.equal(body.results[0].status, "invalid_response");
+        assert.deepEqual(body.usage, { input_tokens: 0, output_tokens: 0 });
       },
       compatibleEnv,
       { usage },
@@ -954,7 +975,7 @@ test("compatible provider reports missing configuration before making a request"
       });
       assert.equal(result.isError, true);
       assert.match(result.content[0].text, /DISCERN_API_KEY and DISCERN_API_BASE_URL are not set/);
-      assert.match(result.content[0].text, /DISCERN_MCP_MODEL is optional/);
+      assert.match(result.content[0].text, /^DISCERN_PROVIDER=compatible but DISCERN_API_KEY and DISCERN_API_BASE_URL are not set\.$/);
       assert.equal(requests.length, 0);
     },
     { DISCERN_PROVIDER: "compatible", DISCERN_API_KEY: "", DISCERN_API_BASE_URL: "" },

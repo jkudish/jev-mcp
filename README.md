@@ -154,8 +154,8 @@ The server itself speaks plain HTTP: terminate TLS at a reverse proxy or load ba
 The `discern-mcp` bin boots a transport when run; importing the package never does. To run the tools in-process (an agent hook, a larger server, a test harness):
 
 - `import { createServer } from "@jkudish/discern-mcp"` — starts no transport: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all twelve, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/discern-mcp/server` is an explicit alias for the same entry.
-- `MODEL` is exported alongside it, resolved from `DISCERN_MCP_MODEL` at import time (default `jev-latest`), so embedders report the same model the CLI serves.
-- `createServer({ toolNames })` chooses which tool names `tools/list` shows (`"discern"` or `"jev"`); without it, `DISCERN_TOOL_NAMES` decides via the exported `resolveToolNames()`. Importing the module applies the `JEV_*` environment aliases to `process.env`, and throws if a `JEV_` and `DISCERN_` pair conflicts.
+- `MODEL` is exported alongside it, resolved from `DISCERN_MCP_MODEL` at import time (default `latest`, each provider's current default model), so embedders report the same model the CLI serves.
+- `createServer({ toolNames })` chooses which tool names `tools/list` shows (`"discern"` or `"jev"`); without it, `DISCERN_TOOL_NAMES` decides via the exported `resolveToolNames()`. The library never changes `process.env`: it reads a copy with the `JEV_*` aliases applied, and `createServer()` throws if a `JEV_` and `DISCERN_` pair conflicts. Only the `discern-mcp` bin writes the aliases into `process.env`.
 - `@jkudish/discern-mcp/bin` is the bin entry; importing it starts a transport, exactly like running `discern-mcp`.
 - The package now declares `exports`, so deep imports like `@jkudish/discern-mcp/dist/index.js` no longer resolve. Before the exports map, importing that path booted a transport inside the importer's process — the trap `/server` and the safe root entry replace. `dist/index.js` remains the bin and still boots when executed.
 
@@ -757,7 +757,7 @@ Built-in provider selection runs through the shared [@jkudish/discern-agent-tool
 
 A fifth carrier, **OpenAI Decisions**, is never auto-detected; select it with `DISCERN_PROVIDER=openai`. See [OpenAI Decisions](#openai-decisions).
 
-`DISCERN_PROVIDER` forces one, or `compatible` for any System One-compatible endpoint. Unknown names and missing credentials are configuration errors, never silent fallbacks. For resilience reasons the OpenRouter, Cloudflare, and compatible transports are implemented locally; see [Transport resilience](#transport-resilience).
+`DISCERN_PROVIDER` forces one, or `compatible` for any System One-compatible endpoint. Unknown names and missing credentials are configuration errors, never silent fallbacks. Every provider, including `compatible`, comes from the shared package with the same retry and deadline rules; see [Transport resilience](#transport-resilience).
 
 The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/discern-agent-tools#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
 
@@ -771,12 +771,12 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `DISCERN_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, `openai`, or `compatible` instead of auto-detection. `openai` is only ever selected this way. |
 | `DISCERN_OPENAI_API_KEY` or `OPENAI_API_KEY` | none | OpenAI Decisions key, `DISCERN_OPENAI_API_KEY` first; used only with `DISCERN_PROVIDER=openai`. |
 | `DISCERN_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Override the OpenAI API root (`/decisions` is appended). `OPENAI_BASE_URL` is deliberately ignored. |
-| `DISCERN_MCP_MODEL` | `jev-latest` | Pin a model: a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter; `clef` or `clef-flash` on Cloudflare. |
+| `DISCERN_MCP_MODEL` | `latest` | `latest` is each provider's current default model (Jev, or `gpt-6-luna` on OpenAI). Pin a model: a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter; `clef` or `clef-flash` on Cloudflare. |
 | `DISCERN_TOOL_NAMES` | `discern` | Which tool names `tools/list` shows: `discern` (`discern_*`) or `jev` (`jev_*`, the 1.x compatibility names). Both sets stay callable. Any other value fails at startup. |
 | `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
 | `DISCERN_API_BASE_URL` + `DISCERN_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `DISCERN_PROVIDER=compatible`. `DISCERN_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
-| `DISCERN_MCP_REQUEST_TIMEOUT_MS` | `60000` | Whole-request deadline in milliseconds, covering every attempt, on the fetch-based transports. |
-| `DISCERN_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on the fetch-based transports; retries happen only on 408, 409, 429, and 500 through 599. |
+| `DISCERN_MCP_REQUEST_TIMEOUT_MS` | `60000` | Whole-request deadline in milliseconds, covering every attempt, on every provider. |
+| `DISCERN_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on every provider; retries happen only on 408, 409, 429, and 500 through 599. |
 | `DISCERN_OPENROUTER_BASE_URL` | `https://openrouter.ai/api` | Override the OpenRouter API root (the `/alpha/decisions` path is appended; a trailing slash is tolerated). |
 | `DISCERN_CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Override the Cloudflare API root (`/accounts/<id>/ai/run` is appended; a trailing slash is tolerated). |
 
@@ -784,7 +784,7 @@ Through 1.x, every `DISCERN_*` variable can also be set under its old `JEV_*` na
 
 ### Transport resilience
 
-The fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpoint) retry only on the standard not-processed status set (408, 409, 429, and 500 through 599), with jittered exponential backoff, at most `DISCERN_MCP_MAX_ATTEMPTS` total attempts, all inside one `DISCERN_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry, non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error bodies on those transports are redacted, so a reflecting endpoint can never echo a configured key into MCP-visible errors. The only exception is the fixed OpenRouter token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Direct TypeSafe, Vercel, and OpenAI calls use `@jkudish/discern-agent-tools`, whose direct fetch path avoids the SDK cancellation crash ([typesafe-sdk-js#2](https://github.com/typesafe-ai/typesafe-sdk-js/issues/2)); no retry or deadline uniformity is claimed for those three. Research and the original report: [issue #23](https://github.com/jkudish/discern-mcp/issues/23) by oppih.
+Every provider shares one HTTP path from `@jkudish/discern-agent-tools`. It retries only the standard not-processed statuses (408, 409, 429, and 500 through 599), honoring `Retry-After` (capped at 5 s) or else a jittered exponential backoff, at most `DISCERN_MCP_MAX_ATTEMPTS` total attempts, all inside one `DISCERN_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry (reported as `no answer within the Nms deadline`), non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error messages are fixed strings with the provider name and numeric status; response bodies never reach them, so a reflecting endpoint cannot echo a configured key into MCP-visible errors. The only upstream detail exposed is OpenRouter's allow-listed token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Research and the original report: [issue #23](https://github.com/jkudish/discern-mcp/issues/23) by oppih.
 
 ### Vercel
 
@@ -799,7 +799,7 @@ With `AI_GATEWAY_API_KEY` set, judgments run through the Vercel AI Gateway at `t
 
 ### OpenAI Decisions
 
-`DISCERN_PROVIDER=openai` sends judgments to [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (public beta). `jev-latest` maps to `gpt-6-luna`; set `DISCERN_MCP_MODEL` to another OpenAI model name to pin one. Results report `provider: "openai"` and the model OpenAI answered with.
+`DISCERN_PROVIDER=openai` sends judgments to [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (public beta). The default `latest` maps to `gpt-6-luna`; set `DISCERN_MCP_MODEL` to another OpenAI model name to pin one. Results report `provider: "openai"` and the model OpenAI answered with.
 
 - This is not Jev. `gpt-6-luna` has its own calibration, so `auto_accept`, `review_at`, and other thresholds tuned on Jev need re-checking against your own labeled cases before you rely on them.
 - It is never auto-detected, because `OPENAI_API_KEY` is set in many environments that never chose it.
@@ -818,9 +818,9 @@ The same provider runs Cloudflare's own [Clef decision models](https://blog.clou
 
 ### OpenRouter
 
-If you already have an OpenRouter key, that is all you need: with no `TYPESAFE_API_KEY` present, every call goes through OpenRouter's Decisions API at identical pricing. The endpoint is alpha and adds a hop. The default `jev-latest` uses OpenRouter's moving `~typesafe/jev-latest` alias; pin `typesafe/jev-1.13` for reproducible routing. Results report the snapshot OpenRouter returns. Direct TypeSafe remains the recommended default when you have both keys.
+If you already have an OpenRouter key, that is all you need: with no `TYPESAFE_API_KEY` present, every call goes through OpenRouter's Decisions API at identical pricing. The endpoint is alpha and adds a hop. The default `latest` uses OpenRouter's moving `~typesafe/jev-latest` alias; pin `typesafe/jev-1.13` for reproducible routing. Results report the snapshot OpenRouter returns. Direct TypeSafe remains the recommended default when you have both keys.
 
-When a Jev request exceeds its token limit, OpenRouter errors report `OpenRouter decisions API 400 (max_tokens_exceeded)`. Other upstream text and unknown error types stay hidden because they can echo credentials or request content.
+When a Jev request exceeds its token limit, OpenRouter errors report `Discern provider openrouter: request failed (HTTP 400, max_tokens_exceeded)`. Other upstream text and unknown error types stay hidden because they can echo credentials or request content.
 
 ### Jev-compatible endpoints
 
@@ -833,9 +833,9 @@ export DISCERN_API_KEY=your-compatible-provider-key
 export DISCERN_MCP_MODEL=openjev
 ```
 
-The server sends `POST` requests with `{ model, state, questions }` and requires the standard response shape: an `answers` object plus a `usage` object reporting `input_tokens` and `output_tokens`, with an optional `model` string echoing the model that answered. Envelope problems (a non-object body or `answers`, malformed `usage` counts, a non-string `model`) are rejected at the transport boundary. Individual answers are not judged here: each tool validates them under its own `invalid_response` contract, so a missing or malformed answer fails closed in the tool instead of aborting the call. `DISCERN_API_BASE_URL` must be the full endpoint URL including the `/v1/systemone` path; it is used verbatim, with no trailing-slash or path normalization. The endpoint and credentials are kept in the local process environment. This adapter is provider-neutral; OpenJEV is one example, not a hard-coded dependency.
+The server sends `POST` requests with `{ model, state, questions }` and requires the standard response shape: an `answers` object plus a `usage` object reporting `input_tokens` and `output_tokens`, with an optional `model` string echoing the model that answered. A missing `usage` counter counts as zero. Envelope problems (a non-object `answers`, malformed `usage` counts, a non-string `model`) fail every judgment in the call closed as `invalid_response`, the same as on every other provider; an unparseable or non-object body is a request error. Individual answers are validated by each tool under its own `invalid_response` contract, so one malformed answer fails only its judgment. `DISCERN_API_BASE_URL` must be the full endpoint URL including the `/v1/systemone` path; it is used verbatim, with no trailing-slash or path normalization. The endpoint and credentials are kept in the local process environment. This adapter is provider-neutral; OpenJEV is one example, not a hard-coded dependency.
 
-One compatibility note: the default model is `jev-latest`, and not every endpoint implements that alias. If calls fail against your endpoint with a client-error status, set `DISCERN_MCP_MODEL` to the model id your endpoint supports (bare, without a provider prefix like `opencode/`).
+One compatibility note: the default `latest` is sent to compatible endpoints as `jev-latest`, and not every endpoint implements that alias. If calls fail against your endpoint with a client-error status, set `DISCERN_MCP_MODEL` to the model id your endpoint supports (bare, without a provider prefix like `opencode/`).
 
 ## Migrating from jev-mcp
 
@@ -889,7 +889,7 @@ To migrate:
 | `JEV_MCP_PATH_TOKEN` | `DISCERN_MCP_PATH_TOKEN` |
 | `JEV_MCP_MAX_CONCURRENCY` | `DISCERN_MCP_MAX_CONCURRENCY` |
 
-Provider keys without the prefix (`TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `AI_GATEWAY_API_KEY`, `HOST`, `PORT`) are unchanged.
+Only these variables are aliased; other `JEV_*` variables are ignored. Provider keys without the prefix (`TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `AI_GATEWAY_API_KEY`, `HOST`, `PORT`) are unchanged.
 
 **Removal in 2.0.** The `jev_*` tool names, `JEV_*` variables, `DISCERN_TOOL_NAMES=jev`, and the `@jkudish/jev-mcp` package are removed in 2.0.
 
