@@ -11,13 +11,16 @@
 // Configuration is validated before any transport starts. stdout carries the
 // MCP protocol, so every diagnostic goes to stderr, one line each.
 
-let env: typeof import("./env.js");
+import { applyLegacyEnv, discernName } from "./env.js";
+
+let legacy: readonly string[];
 let server: typeof import("./server.js");
 let toolNames: import("./server.js").ToolNames;
 try {
-  // Dynamic, so an env conflict thrown while the modules evaluate is caught
-  // here and reported as one fixed line instead of an uncaught stack.
-  env = await import("./env.js");
+  // The bin applies the JEV_* aliases to process.env before the server module
+  // loads, so MODEL and every later read see the DISCERN_ names. A conflict is
+  // reported as one fixed line instead of an uncaught stack.
+  legacy = applyLegacyEnv();
   server = await import("./server.js");
   toolNames = server.resolveToolNames();
 } catch (error) {
@@ -25,8 +28,8 @@ try {
   process.exit(1);
 }
 
-for (const name of env.legacyEnvNames) {
-  console.error(`[discern-mcp] ${name} is deprecated; rename it to ${env.discernName(name)}. JEV_* names stop working in 2.0.`);
+for (const name of legacy) {
+  console.error(`[discern-mcp] ${name} is deprecated; rename it to ${discernName(name)}. JEV_* names stop working in 2.0.`);
 }
 
 const factory = () => server.createServer({ toolNames });
