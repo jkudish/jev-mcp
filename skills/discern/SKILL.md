@@ -10,7 +10,7 @@ mcpServers:
 
 # Discern
 
-Twelve judgment tools from discern-mcp, answered by TypeSafe's Jev model by default or by OpenAI's Decisions API. They return typed judgments and probabilities. The tools advise. You enforce policy.
+Twelve judgment tools from discern-mcp, answered by TypeSafe's Jev model by default, or by Cloudflare's Clef or OpenAI's Decisions API. They return typed judgments and probabilities. The tools advise. You enforce policy.
 
 The tools are named `discern_*`. Through 1.x the older `jev_*` names still work as aliases; the `@jkudish/jev-mcp` compatibility package lists them instead.
 

@@ -2865,3 +2865,32 @@ test("openai is never auto-selected from OPENAI_API_KEY alone", async () => {
     assert.equal(requests.length, 0);
   }, (port) => ({ ...openaiEnv(port), DISCERN_PROVIDER: "" }));
 });
+
+test("cloudflare provider runs Clef models with their single-nested envelope", async () => {
+  const clefReply = {
+    success: true,
+    result: {
+      model: "clef-flash",
+      answers: {
+        relation_claim0: { type: "choice", choice: "supports", probabilities: { supports: 0.9354, contradicts: 0.0506, says_nothing: 0.014 }, confidence: 0.8165 },
+        subject_claim0: { type: "noul", noul: 0.9551 },
+      },
+      usage: { input_tokens: 346, output_tokens: 0 },
+    },
+  };
+  await withMock({}, async (client, requests) => {
+    const body = payload(await client.callTool({ name: "discern_verify", arguments: { claims: ["The patch is ready"], evidence: "The tests pass" } }));
+    assert.equal(body.provider, "cloudflare");
+    assert.equal(body.model, "clef-flash");
+    assert.equal(body.results[0].verdict, "verified");
+    assert.equal(body.results[0].confidence, 0.8165);
+    assert.equal(requests[0].body.model, "@cf/cloudflare/clef-flash");
+    assert.ok(requests[0].body.input.questions.relation_claim0);
+  }, (port) => ({
+    DISCERN_PROVIDER: "cloudflare",
+    DISCERN_MCP_MODEL: "clef-flash",
+    DISCERN_CLOUDFLARE_API_TOKEN: "cf-token",
+    CLOUDFLARE_ACCOUNT_ID: "test-account",
+    DISCERN_CLOUDFLARE_BASE_URL: `http://127.0.0.1:${port}`,
+  }), { raw: JSON.stringify(clefReply) });
+});

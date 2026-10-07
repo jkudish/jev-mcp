@@ -11,18 +11,20 @@ import { normalizeDiscernEnv } from "@jkudish/discern-agent-tools";
 import { PROBABILITY_SUM_TOLERANCE } from "../dist/lib.js";
 
 const serverPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
-// Legacy DISCERN_* names still configure the harness through the DISCERN_ alias.
+// Legacy JEV_* names still configure the harness through the DISCERN_ alias.
 const env = normalizeDiscernEnv(process.env).env;
-// TypeSafe runs need its key; an explicit DISCERN_PROVIDER=openai run needs
-// DISCERN_OPENAI_API_KEY (or OPENAI_API_KEY) instead.
+// TypeSafe runs need its key; explicit DISCERN_PROVIDER=openai or cloudflare
+// runs (for example DISCERN_MCP_MODEL=clef) need that carrier's credentials.
 const hasKey = env.DISCERN_PROVIDER === "openai"
   ? Boolean(env.DISCERN_OPENAI_API_KEY || env.OPENAI_API_KEY)
-  : Boolean(env.TYPESAFE_API_KEY);
+  : env.DISCERN_PROVIDER === "cloudflare"
+    ? Boolean((env.DISCERN_CLOUDFLARE_API_TOKEN || env.CLOUDFLARE_API_TOKEN) && env.CLOUDFLARE_ACCOUNT_ID)
+    : Boolean(env.TYPESAFE_API_KEY);
 
 // The SDK filters the environment to a safe subset by default, which drops
 // provider keys. Forward what this server needs explicitly, under DISCERN_*
 // names only.
-const FORWARDED = ["TYPESAFE_API_KEY", "DISCERN_MCP_MODEL", "DISCERN_PROVIDER", "DISCERN_OPENAI_API_KEY", "OPENAI_API_KEY"];
+const FORWARDED = ["TYPESAFE_API_KEY", "DISCERN_MCP_MODEL", "DISCERN_PROVIDER", "DISCERN_OPENAI_API_KEY", "OPENAI_API_KEY", "DISCERN_CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"];
 
 async function withClient(fn) {
   const client = new Client({ name: "discern-mcp-e2e", version: "0.1.0" });

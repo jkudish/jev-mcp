@@ -4,7 +4,7 @@
 // {state, questions} / answers contract; the shared package translates OpenAI. Proxies add hops, so direct TypeSafe remains the recommended default.
 
 import "./env.js";
-import { ask, openrouterJevModel, resolveTransport, type DiscernTransport, type DiscernTransportReply } from "@jkudish/discern-agent-tools";
+import { cloudflareModel, ask, openrouterJevModel, resolveTransport, type DiscernTransport, type DiscernTransportReply } from "@jkudish/discern-agent-tools";
 import { isRecord } from "./lib.js";
 
 export type DiscernProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "openai" | "compatible";
@@ -415,7 +415,9 @@ export async function askDiscern(
 
   // Cloudflare Workers AI wraps the same contract in {model, input} and the
   // v4 {result, success} envelope. Single alias; no version pinning.
-  const cfSlug = model.startsWith("typesafe/") ? model : `typesafe/${model === "jev-latest" ? "jev" : model}`;
+  // The shared package owns the mapping: `clef`/`clef-flash` name Cloudflare's
+  // Clef models, `@cf/` ids pass through, everything else is a Jev name.
+  const cfSlug = cloudflareModel(model);
   const cfToken = process.env.DISCERN_CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
   const cfBase = process.env.DISCERN_CLOUDFLARE_BASE_URL || "https://api.cloudflare.com/client/v4";
   const cfDeadline = deadlineSignal(signal, REQUEST_TIMEOUT_MS);
@@ -450,7 +452,7 @@ export async function askDiscern(
   if (cfStatus >= 400 || cfBody.success === false) {
     throw cfError();
   }
-  // The v4 envelope double-nests: body.result.result holds the model output.
+  // Jev double-nests (body.result.result); Clef returns body.result directly.
   const cfOuter = cfBody.result;
   if (cfOuter && typeof cfOuter.state === "string" && cfOuter.state !== "Completed") {
     throw cfError();
