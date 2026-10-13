@@ -819,6 +819,7 @@ Set `DISCERN_PROVIDER=subq` and `DISCERN_SUBQ_API_KEY` (or `SUBQ_API_KEY`). `lat
 - [Snap is in public preview](https://docs.subq.ai/endpoints/decisions-api/), with its own calibration. Existing thresholds stay unchanged; evaluate labeled cases before relying on them for policy.
 - Native structured state, instructions and criteria are preserved, as are probabilities and fractional scores. Limits: 255 Choice options, 10 Score levels, 100-character question IDs, 393,216-token context (near-limit requests may fail). Images are not exposed by this adapter.
 - We observed a 16-question request limit. Larger calls use serial chunks under one shared deadline, repeating the state and summing usage. A failed or malformed chunk invalidates the whole call's judgments; no partial answers are exposed. Earlier chunks may still be billed. Inconsistent effective models fail the call.
+- This all-or-nothing validation applies to **every SubQ call**, including 16 or fewer questions: one invalid or refused answer marks all judgments in that call `invalid_response`. Siblings are not preserved as they are on OpenAI.
 - Published pricing is $0.05 per million input tokens, output free. Batch latency and input usage grow with repeated state.
 - **API data is retained indefinitely by default.** Organization-level ZDR requires contacting SubQ. There is no documented Decisions `store:false` control; review [retention](https://docs.subq.ai/using-the-api/data-retention/) before sending sensitive inputs.
 
