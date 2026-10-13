@@ -10,7 +10,9 @@ mcpServers:
 
 # Discern
 
-Twelve judgment tools from discern-mcp, answered by TypeSafe's Jev model by default, or by Cloudflare's Clef or OpenAI's Decisions API. They return typed judgments and probabilities. The tools advise. You enforce policy.
+Twelve judgment tools from discern-mcp, answered by TypeSafe's Jev model by default, or by Cloudflare's Clef, OpenAI Decisions, or SubQ Decisions. They return typed judgments and probabilities. The tools advise. You enforce policy.
+
+SubQ is explicit-only (`DISCERN_PROVIDER=subq`, `DISCERN_SUBQ_API_KEY` or `SUBQ_API_KEY`), defaulting to `subq-snap-preview`. Larger batches use serial 16-question chunks; a bad chunk invalidates the whole call. Existing thresholds are not a calibration guarantee. SubQ retains API data indefinitely unless organization ZDR is arranged; do not send sensitive inputs without checking that policy. See the package README's SubQ section for limits and configuration.
 
 The tools are named `discern_*`. Through 1.x the older `jev_*` names still work as aliases; the `@jkudish/jev-mcp` compatibility package lists them instead.
 

@@ -10,7 +10,7 @@ import { ask, resolveTransport, type DiscernTransportReply } from "@jkudish/disc
 import { discernEnv } from "./env.js";
 import { isRecord } from "./lib.js";
 
-export type DiscernProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "openai" | "compatible";
+export type DiscernProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "openai" | "compatible" | "subq";
 
 export interface AskResult {
   answers: Record<string, any>;

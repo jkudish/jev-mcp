@@ -56,6 +56,8 @@ node examples/hook-gate.mjs --policy "No force pushes. Never touch the productio
 node examples/hook-gate.mjs --policy-file policy.md < examples/hook-gate-sample.json
 ```
 
+For SubQ, set `DISCERN_PROVIDER=subq` with `DISCERN_SUBQ_API_KEY` or `SUBQ_API_KEY`; the hook forwards that key and optional `DISCERN_SUBQ_BASE_URL` to its server subprocess. Legacy `JEV_SUBQ_*` aliases work through 1.x. SubQ retains API data indefinitely unless organization ZDR is arranged; review its policy before sending tool inputs. Keep the gate threshold until your own labeled evaluation justifies a change.
+
 `--policy` / `--policy-file` carry the policy (bounded at 2,000 characters to
 fit `discern_decide` priorities). `--ask` maps the `ask_user` escape hatch to
 `permissionDecision: "ask"` (Claude Code only; Codex reports `ask` as an

@@ -1,7 +1,7 @@
 {
   "name": "@jkudish/discern-mcp",
   "version": "1.0.0",
-  "description": "MCP server for calibrated judgment tools: verify claims, screen for injection, find, rerank, classify, decide, compare passages, extract fields, review patches, and gate completion claims, each with typed probabilities. Runs on TypeSafe Jev by default or OpenAI's Decisions API.",
+  "description": "MCP server for judgment tools: verify, screen, find, rerank, classify, decide, compare, extract, review, and gate completion claims with typed probabilities. Runs on TypeSafe Jev, Cloudflare Clef, OpenAI Decisions, or SubQ Decisions.",
   "type": "module",
   "license": "MIT",
   "author": "Joey Kudish",
