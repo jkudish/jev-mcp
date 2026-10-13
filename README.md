@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 <p align="center">
-  <img src=".github/discern-mcp-banner.png" alt="discern-mcp: typed judgments with calibrated probabilities, as MCP tools. Runs on TypeSafe's Jev, Cloudflare's Clef, or OpenAI Decisions." />
+  <img src=".github/discern-mcp-banner.png" alt="discern-mcp: typed judgments as MCP tools. Runs on TypeSafe's Jev, Cloudflare's Clef, OpenAI Decisions, or SubQ Decisions." />
 </p>
 
 Fast, cheap, typed judgments as MCP tools, answered by TypeSafe's Jev model by default, or by Cloudflare's Clef, OpenAI Decisions, or SubQ Decisions.
