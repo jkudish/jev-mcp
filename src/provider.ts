@@ -1,10 +1,11 @@
 // Every judgment goes through @jkudish/discern-agent-tools, which owns the
 // carriers (TypeSafe Jev, OpenRouter, Cloudflare Workers AI including Clef,
-// Vercel AI Gateway, a System One-compatible endpoint, and OpenAI Decisions),
+// Vercel AI Gateway, a System One-compatible endpoint, OpenAI Decisions, SubQ),
 // their retries, the whole-request deadline, the response-size ceiling, and
 // fixed-string errors. This module adds only what MCP needs on top: its two
 // resilience settings, and per-judgment validation, so one bad answer
-// invalidates that judgment rather than the whole call.
+// invalidates that judgment rather than the whole call when a raw reply exists.
+// SubQ never exposes invalid partial replies, even for a single chunk.
 
 import { ask, resolveTransport, type DiscernTransportReply } from "@jkudish/discern-agent-tools";
 import { discernEnv } from "./env.js";
@@ -39,6 +40,8 @@ export async function askDiscern(
   const maxAttempts = positiveInt(env.DISCERN_MCP_MAX_ATTEMPTS);
   // Keep the raw reply: the shared validator rejects a whole batch when one
   // answer is invalid, but MCP reports each judgment on its own.
+  // SubQ's chunk-local validation exposes no reply on rejection, so all its
+  // judgments become invalid_response, including calls with <=16 questions.
   let reply: DiscernTransportReply | undefined;
   const result = await ask(
     { state, questions, model, signal: signal ?? new AbortController().signal },
