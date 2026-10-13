@@ -17,6 +17,8 @@ const env = normalizeDiscernEnv(process.env).env;
 // runs (for example DISCERN_MCP_MODEL=clef) need that carrier's credentials.
 const hasKey = env.DISCERN_PROVIDER === "openai"
   ? Boolean(env.DISCERN_OPENAI_API_KEY || env.OPENAI_API_KEY)
+  : env.DISCERN_PROVIDER === "subq"
+    ? Boolean(env.DISCERN_SUBQ_API_KEY || env.SUBQ_API_KEY)
   : env.DISCERN_PROVIDER === "cloudflare"
     ? Boolean((env.DISCERN_CLOUDFLARE_API_TOKEN || env.CLOUDFLARE_API_TOKEN) && env.CLOUDFLARE_ACCOUNT_ID)
     : Boolean(env.TYPESAFE_API_KEY);
@@ -24,7 +26,7 @@ const hasKey = env.DISCERN_PROVIDER === "openai"
 // The SDK filters the environment to a safe subset by default, which drops
 // provider keys. Forward what this server needs explicitly, under DISCERN_*
 // names only.
-const FORWARDED = ["TYPESAFE_API_KEY", "DISCERN_MCP_MODEL", "DISCERN_PROVIDER", "DISCERN_OPENAI_API_KEY", "OPENAI_API_KEY", "DISCERN_CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"];
+const FORWARDED = ["TYPESAFE_API_KEY", "DISCERN_MCP_MODEL", "DISCERN_PROVIDER", "DISCERN_OPENAI_API_KEY", "OPENAI_API_KEY", "DISCERN_SUBQ_API_KEY", "SUBQ_API_KEY", "DISCERN_SUBQ_BASE_URL", "DISCERN_CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"];
 
 async function withClient(fn) {
   const client = new Client({ name: "discern-mcp-e2e", version: "0.1.0" });

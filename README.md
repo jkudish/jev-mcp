@@ -7,7 +7,7 @@
   <img src=".github/discern-mcp-banner.png" alt="discern-mcp: typed judgments with calibrated probabilities, as MCP tools. Runs on TypeSafe's Jev, Cloudflare's Clef, or OpenAI Decisions." />
 </p>
 
-Fast, cheap, typed judgments as MCP tools, answered by TypeSafe's Jev model by default, or by Cloudflare's Clef or OpenAI's Decisions API.
+Fast, cheap, typed judgments as MCP tools, answered by TypeSafe's Jev model by default, or by Cloudflare's Clef, OpenAI Decisions, or SubQ Decisions.
 
 > **Renamed.** This package was `@jkudish/jev-mcp` before 1.0. Existing setups keep working through 1.x; see [Migrating from jev-mcp](#migrating-from-jev-mcp).
 
@@ -758,6 +758,8 @@ Built-in provider selection runs through the shared [@jkudish/discern-agent-tool
 
 **OpenAI Decisions** is never auto-detected; select it with `DISCERN_PROVIDER=openai`. See [OpenAI Decisions](#openai-decisions).
 
+**SubQ Decisions** is also explicit-only: `DISCERN_PROVIDER=subq`. See [SubQ](#subq).
+
 `DISCERN_PROVIDER` forces one. Unknown names and missing credentials are configuration errors, never silent fallbacks. Every provider, including `compatible`, comes from the shared package with the same retry and deadline rules; see [Transport resilience](#transport-resilience).
 
 The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/discern-agent-tools#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
@@ -769,10 +771,12 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | none | Cloudflare Workers AI; used when no other provider key is present. `DISCERN_CLOUDFLARE_API_TOKEN` is honored first for separate credentials. |
 | `AI_GATEWAY_API_KEY` | none | Vercel AI Gateway; used when no other provider key is present. |
 | `DISCERN_VERCEL_ZERO_DATA_RETENTION` | unset | `1` or `true` asks the Vercel AI Gateway to route only through its zero-data-retention providers; use with `DISCERN_PROVIDER=vercel`. See [Vercel](#vercel). |
-| `DISCERN_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, `openai`, or `compatible` instead of auto-detection. `openai` is only ever selected this way. |
+| `DISCERN_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, `openai`, `subq`, or `compatible` instead of auto-detection. `openai` and `subq` are explicit-only. |
 | `DISCERN_OPENAI_API_KEY` or `OPENAI_API_KEY` | none | OpenAI Decisions key, `DISCERN_OPENAI_API_KEY` first; used only with `DISCERN_PROVIDER=openai`. |
 | `DISCERN_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Override the OpenAI API root (`/decisions` is appended). `OPENAI_BASE_URL` is deliberately ignored. |
-| `DISCERN_MCP_MODEL` | `latest` | `latest` is each provider's current default model (Jev, or `gpt-6-luna` on OpenAI). Pin a model: a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter; `clef` or `clef-flash` on Cloudflare. |
+| `DISCERN_SUBQ_API_KEY` or `SUBQ_API_KEY` | none | SubQ key, `DISCERN_SUBQ_API_KEY` first; used only with `DISCERN_PROVIDER=subq`. |
+| `DISCERN_SUBQ_BASE_URL` | `https://api.subq.ai/v1` | Override the SubQ API root (`/systemone` is appended). |
+| `DISCERN_MCP_MODEL` | `latest` | Current default (Jev, `gpt-6-luna` on OpenAI, `subq-snap-preview` on SubQ). Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter; `clef` or `clef-flash` on Cloudflare. |
 | `DISCERN_TOOL_NAMES` | `discern` | Which tool names `tools/list` shows: `discern` (`discern_*`) or `jev` (`jev_*`, the 1.x compatibility names). Both sets stay callable. Any other value fails at startup. |
 | `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` | Custom direct endpoint (origin only; `/v1/systemone` is appended). |
 | `DISCERN_API_BASE_URL` + `DISCERN_API_KEY` | none | System One-compatible endpoint and Bearer token; used when no other provider is configured, or with `DISCERN_PROVIDER=compatible`. `DISCERN_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
@@ -807,6 +811,16 @@ With `AI_GATEWAY_API_KEY` set, judgments run through the Vercel AI Gateway at `t
 - The shared package translates the wire format: state becomes a labeled, pretty-printed JSON `input`, each noul becomes a true/false choice carrying its criteria, and the answers array is keyed back by question name. Requests above OpenAI's 200-question limit (for example a 250-candidate `discern_rerank`) are split into concurrent requests.
 - A question OpenAI declines comes back as a refusal. The affected judgment is `invalid_response`; its siblings are unaffected.
 - Data goes to OpenAI under your organization's data controls. Zero data retention applies only if your organization is eligible and has it enabled.
+
+### SubQ
+
+Set `DISCERN_PROVIDER=subq` and `DISCERN_SUBQ_API_KEY` (or `SUBQ_API_KEY`). `latest` and `jev-latest` map to `subq-snap-preview`; `DISCERN_MCP_MODEL` can pin an explicit ID. Results report `provider: "subq"` and the effective response model.
+
+- [Snap is in public preview](https://docs.subq.ai/endpoints/decisions-api/), with its own calibration. Existing thresholds stay unchanged; evaluate labeled cases before relying on them for policy.
+- Native structured state, instructions and criteria are preserved, as are probabilities and fractional scores. Limits: 255 Choice options, 10 Score levels, 100-character question IDs, 393,216-token context (near-limit requests may fail). Images are not exposed by this adapter.
+- We observed a 16-question request limit. Larger calls use serial chunks under one shared deadline, repeating the state and summing usage. A failed or malformed chunk invalidates the whole call's judgments; no partial answers are exposed. Earlier chunks may still be billed. Inconsistent effective models fail the call.
+- Published pricing is $0.05 per million input tokens, output free. Batch latency and input usage grow with repeated state.
+- **API data is retained indefinitely by default.** Organization-level ZDR requires contacting SubQ. There is no documented Decisions `store:false` control; review [retention](https://docs.subq.ai/using-the-api/data-retention/) before sending sensitive inputs.
 
 ### Cloudflare
 
@@ -877,6 +891,8 @@ To migrate:
 | `JEV_MCP_MODEL` | `DISCERN_MCP_MODEL` |
 | `JEV_OPENAI_API_KEY` | `DISCERN_OPENAI_API_KEY` |
 | `JEV_OPENAI_BASE_URL` | `DISCERN_OPENAI_BASE_URL` |
+| `JEV_SUBQ_API_KEY` | `DISCERN_SUBQ_API_KEY` |
+| `JEV_SUBQ_BASE_URL` | `DISCERN_SUBQ_BASE_URL` |
 | `JEV_OPENROUTER_BASE_URL` | `DISCERN_OPENROUTER_BASE_URL` |
 | `JEV_CLOUDFLARE_API_TOKEN` | `DISCERN_CLOUDFLARE_API_TOKEN` |
 | `JEV_CLOUDFLARE_BASE_URL` | `DISCERN_CLOUDFLARE_BASE_URL` |

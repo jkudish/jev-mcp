@@ -13,6 +13,7 @@ jev-mcp is now **discern-mcp**. "Jev" names TypeSafe's model, and the server now
 
 ### Providers
 
+- SubQ Decisions: explicit-only `DISCERN_PROVIDER=subq` with `DISCERN_SUBQ_API_KEY` or `SUBQ_API_KEY`, optional `DISCERN_SUBQ_BASE_URL`. Both default aliases map to `subq-snap-preview`; results identify the effective model. Native inputs and fractional scores are preserved. Larger batches use serial 16-question chunks under one deadline; a bad chunk invalidates the whole call, never exposes partial judgments, and stops remaining requests. SubQ retains data indefinitely by default; organization ZDR requires contacting SubQ. Existing policy thresholds are unchanged.
 - OpenAI Decisions: `DISCERN_PROVIDER=openai` with `DISCERN_OPENAI_API_KEY` or `OPENAI_API_KEY`. Never auto-detected. A refused question invalidates only that judgment.
 - Cloudflare's Clef: `DISCERN_PROVIDER=cloudflare` with `DISCERN_MCP_MODEL=clef` or `clef-flash`.
 - The default model is the neutral `latest`: Jev on Jev providers, `gpt-6-luna` on OpenAI. `jev-latest` keeps working. An empty `DISCERN_MCP_MODEL` means the default.
