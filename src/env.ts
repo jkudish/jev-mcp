@@ -1,5 +1,5 @@
 // Discern 1.x environment aliases. Each listed legacy JEV_<X> variable is read
-// as DISCERN_<X> (normalizeDiscernEnv in @jkudish/discern-agent-tools owns the
+// as DISCERN_<X> (normalizeDiscernEnv in @jkudish/discern-sdk owns the
 // rule): a JEV_<X> set alone is used and reported; DISCERN_<X> wins when both
 // match; two different values are an error that names both variables and never
 // their values. JEV_* names stop working in 2.0.
@@ -8,7 +8,7 @@
 // normalized copy through discernEnv(). Only the bin entry (index.ts) calls
 // applyLegacyEnv(), once, before it starts a transport, the same split as
 // discern-browser.
-import { DISCERN_ENV_NAMES, normalizeDiscernEnv, type Env } from "@jkudish/discern-agent-tools";
+import { DISCERN_ENV_NAMES, normalizeDiscernEnv, type Env } from "@jkudish/discern-sdk";
 
 /** Every variable this server reads, as suffixes after DISCERN_ (or JEV_). */
 export const MCP_ENV_NAMES: readonly string[] = Object.freeze([

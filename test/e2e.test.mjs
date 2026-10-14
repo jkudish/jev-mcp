@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { normalizeDiscernEnv } from "@jkudish/discern-agent-tools";
+import { normalizeDiscernEnv } from "@jkudish/discern-sdk";
 import { PROBABILITY_SUM_TOLERANCE } from "../dist/lib.js";
 
 const serverPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
