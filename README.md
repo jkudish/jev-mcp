@@ -748,7 +748,7 @@ For Choice and Score, `confidence` measures how peaked the option probabilities 
 
 ### Providers
 
-Built-in provider selection runs through the shared [@jkudish/discern-agent-tools](https://github.com/jkudish/discern-agent-tools) wire package: it picks a carrier from your environment, sends the judgment, and validates the answer before any tool sees it. Auto-detection tries these in order:
+Built-in provider selection runs through the shared [@jkudish/discern-sdk](https://github.com/jkudish/discern-sdk) wire package: it picks a carrier from your environment, sends the judgment, and validates the answer before any tool sees it. Auto-detection tries these in order:
 
 - **TypeSafe** (`TYPESAFE_API_KEY`): direct, and the default when set.
 - **OpenRouter** (`OPENROUTER_API_KEY`).
@@ -762,7 +762,7 @@ Built-in provider selection runs through the shared [@jkudish/discern-agent-tool
 
 `DISCERN_PROVIDER` forces one. Unknown names and missing credentials are configuration errors, never silent fallbacks. Every provider, including `compatible`, comes from the shared package with the same retry and deadline rules; see [Transport resilience](#transport-resilience).
 
-The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/discern-agent-tools#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
+The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/discern-sdk#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
@@ -789,7 +789,7 @@ Through 1.x, every `DISCERN_*` variable in this table can also be set under its 
 
 ### Transport resilience
 
-Every provider shares one HTTP path from `@jkudish/discern-agent-tools`. It retries only the standard not-processed statuses (408, 409, 429, and 500 through 599), honoring `Retry-After` (capped at 5 s) or else a jittered exponential backoff, at most `DISCERN_MCP_MAX_ATTEMPTS` total attempts, all inside one `DISCERN_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry (reported as `no answer within the Nms deadline`), non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error messages are fixed strings with the provider name and numeric status; response bodies never reach them, so a reflecting endpoint cannot echo a configured key into MCP-visible errors. The only upstream detail exposed is OpenRouter's allow-listed token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Research and the original report: [issue #23](https://github.com/jkudish/discern-mcp/issues/23) by oppih.
+Every provider shares one HTTP path from `@jkudish/discern-sdk`. It retries only the standard not-processed statuses (408, 409, 429, and 500 through 599), honoring `Retry-After` (capped at 5 s) or else a jittered exponential backoff, at most `DISCERN_MCP_MAX_ATTEMPTS` total attempts, all inside one `DISCERN_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry (reported as `no answer within the Nms deadline`), non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error messages are fixed strings with the provider name and numeric status; response bodies never reach them, so a reflecting endpoint cannot echo a configured key into MCP-visible errors. The only upstream detail exposed is OpenRouter's allow-listed token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Research and the original report: [issue #23](https://github.com/jkudish/discern-mcp/issues/23) by oppih.
 
 ### Vercel
 

@@ -18,7 +18,7 @@ jev-mcp is now **discern-mcp**. "Jev" names TypeSafe's model, and the server now
 - OpenAI Decisions: `DISCERN_PROVIDER=openai` with `DISCERN_OPENAI_API_KEY` or `OPENAI_API_KEY`. Never auto-detected. A refused question invalidates only that judgment.
 - Cloudflare's Clef: `DISCERN_PROVIDER=cloudflare` with `DISCERN_MCP_MODEL=clef` or `clef-flash`.
 - The default model is the neutral `latest`: Jev on Jev providers, `gpt-6-luna` on OpenAI. `jev-latest` keeps working. An empty `DISCERN_MCP_MODEL` means the default.
-- Every provider transport now lives in `@jkudish/discern-agent-tools` 1.0.0; this server keeps only per-judgment validation. TypeSafe, Vercel, and OpenAI gain the deadline (`DISCERN_MCP_REQUEST_TIMEOUT_MS`) and retry limit (`DISCERN_MCP_MAX_ATTEMPTS`) the other providers already had.
+- Every provider transport now lives in `@jkudish/discern-sdk` 1.0.0; this server keeps only per-judgment validation. TypeSafe, Vercel, and OpenAI gain the deadline (`DISCERN_MCP_REQUEST_TIMEOUT_MS`) and retry limit (`DISCERN_MCP_MAX_ATTEMPTS`) the other providers already had.
 
 ### Behavior changes
 

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { normalizeDiscernEnv } from "@jkudish/discern-agent-tools";
+import { normalizeDiscernEnv } from "@jkudish/discern-sdk";
 
 export const DEFAULT_BLOCK_THRESHOLD = 0.85;
 export const DEFAULT_TIMEOUT_MS = 15_000;

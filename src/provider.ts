@@ -1,4 +1,4 @@
-// Every judgment goes through @jkudish/discern-agent-tools, which owns the
+// Every judgment goes through @jkudish/discern-sdk, which owns the
 // carriers (TypeSafe Jev, OpenRouter, Cloudflare Workers AI including Clef,
 // Vercel AI Gateway, a System One-compatible endpoint, OpenAI Decisions, SubQ),
 // their retries, the whole-request deadline, the response-size ceiling, and
@@ -7,7 +7,7 @@
 // invalidates that judgment rather than the whole call when a raw reply exists.
 // SubQ never exposes invalid partial replies, even for a single chunk.
 
-import { ask, resolveTransport, type DiscernTransportReply } from "@jkudish/discern-agent-tools";
+import { ask, resolveTransport, type DiscernTransportReply } from "@jkudish/discern-sdk";
 import { discernEnv } from "./env.js";
 import { isRecord } from "./lib.js";
 

@@ -10,7 +10,7 @@ npm run build
 npm run typecheck
 ```
 
-Node.js 22 or newer. TypeScript, ESM; runtime dependencies include the MCP SDK, TypeSafe SDK, `@jkudish/discern-agent-tools`, and zod.
+Node.js 22 or newer. TypeScript, ESM; runtime dependencies include the MCP SDK, TypeSafe SDK, `@jkudish/discern-sdk`, and zod.
 
 ## Tests
 
@@ -31,7 +31,7 @@ Both suites must pass before a pull request can merge. If you add behavior, add 
 - New judgments belong in the tool questions and criteria, not in post-processing that second-guesses the model.
 - Do not add tools without opening an issue first describing the judgment you want and why the existing twelve do not cover it.
 - Update the README example for any tool whose arguments or results change.
-- Provider transports, retries, and timeouts belong in `@jkudish/discern-agent-tools`, not here.
+- Provider transports, retries, and timeouts belong in `@jkudish/discern-sdk`, not here.
 - Use `discern_*` tool names and `DISCERN_*` variables in code, tests, and docs. Add any new variable to `MCP_ENV_NAMES` in `src/env.ts`, and read it through `discernEnv()`, never `process.env` directly. The `jev_*` and `JEV_*` aliases exist only for 1.x compatibility and are covered by `test/aliases.test.mjs` and `test/compat.test.mjs`.
 - The `@jkudish/jev-mcp` compatibility package lives in `compat/jev-mcp/`. Keep it a thin alias; it ships separately and is not part of the root package.
 

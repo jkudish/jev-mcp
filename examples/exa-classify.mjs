@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { normalizeDiscernEnv } from "@jkudish/discern-agent-tools";
+import { normalizeDiscernEnv } from "@jkudish/discern-sdk";
 import { MAX_ITEMS, MAX_ITEM_CHARS } from "../dist/lib.js";
 
 export const classes = [

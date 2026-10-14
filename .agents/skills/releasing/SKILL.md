@@ -46,9 +46,9 @@ This repository publishes two packages:
 
 - `@jkudish/discern-mcp` is a brand-new package, so 1.0.0 must be published
   interactively by Joey (see the first rule below). It depends on
-  `@jkudish/discern-agent-tools` 1.0.0, which must be live first.
+  `@jkudish/discern-sdk` 1.0.0, which must be live first.
 - Before step 2, refresh the lockfile against the published
-  `@jkudish/discern-agent-tools`; until then it still points at
+  `@jkudish/discern-sdk`; until then it still points at
   jev-agent-tools and `npm ci` fails.
 - `@jkudish/jev-mcp` 1.0.0 is an existing package, so it stages normally,
   after `@jkudish/discern-mcp` 1.0.0 is live.

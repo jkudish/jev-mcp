@@ -49,7 +49,7 @@
     "semantic-search"
   ],
   "dependencies": {
-    "@jkudish/discern-agent-tools": "^1.0.0",
+    "@jkudish/discern-sdk": "^1.0.0",
     "@modelcontextprotocol/node": "^2.1.2",
     "@modelcontextprotocol/server": "^2.4.0",
     "@typesafe-ai/sdk": "^0.7.0",
