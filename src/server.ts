@@ -258,7 +258,7 @@ const visualEvidenceItem = strictShape({
   id: z.string().optional(),
   text: z.string().optional(),
   image: imageSchema.optional(),
-}).refine((item) => Boolean(item.text?.trim() || item.image), "Evidence requires text or an image");
+}).refine((item) => item.text !== undefined || item.image !== undefined, "Evidence requires text or an image");
 const verifyEvidenceSchema = z.union([z.string(), visualEvidenceItem, z.array(visualEvidenceItem).min(1)]);
 
 // ─────────────────────────────────────────────────────────────────────────────
