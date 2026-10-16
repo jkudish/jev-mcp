@@ -2917,6 +2917,23 @@ test("cloudflare provider runs Clef models with their single-nested envelope", a
 });
 
 // Images exercise the actual SDK package through the CLI and a real stdio client.
+test("verify preserves blank text evidence while rejecting items with neither text nor image", async () => {
+  const evidence = [{ id: "empty", text: "" }, { id: "space", text: "  " }, { id: "notes", text: "The tests pass" }];
+  await withMock(request => {
+    assert.deepEqual(request.state.evidence, evidence);
+    return { relation_claim0: pick("supports", RELATION_KEYS), source_claim0: pick("notes", Object.keys(request.questions.source_claim0.criteria)) };
+  }, async (client, requests) => {
+    const invalid = await client.callTool({ name: "discern_verify", arguments: { claims: ["The tests pass"], evidence: { id: "missing" } } });
+    assert.equal(invalid.isError, true);
+    assert.equal(requests.length, 0);
+    const result = await client.callTool({ name: "discern_verify", arguments: { claims: ["The tests pass"], evidence } });
+    assert.notEqual(result.isError, true);
+    assert.equal(payload(result).results[0].verdict, "verified");
+    assert.equal(payload(result).results[0].supporting_evidence, "notes");
+    assert.equal(requests.length, 1);
+  });
+});
+
 const IMAGE_BYTES = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 17]);
 const IMAGE = { mime_type: "image/png", data_base64: IMAGE_BYTES.toString("base64") };
 const BOX = { top: 0.13, bottom: 0.72, left: 0.61, right: 0.89 };
