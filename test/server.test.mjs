@@ -13,7 +13,7 @@ const rootEntry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 // Exit codes distinguish failures inside the child so the assertion message
 // names the defect, not just "child failed".
 const CHILD_PROGRAM = `
-  for (const spec of ["@jkudish/jev-mcp", "@jkudish/jev-mcp/server"]) {
+  for (const spec of ["@jkudish/discern-mcp", "@jkudish/discern-mcp/server"]) {
     const m = await import(spec);
     if (typeof m.createServer !== "function") process.exit(2);
     if (typeof m.MODEL !== "string" || !m.MODEL) process.exit(3);
@@ -38,7 +38,7 @@ test("the root and /server entries import without booting a transport", async ()
           const reason = { 2: "createServer missing", 3: "MODEL missing", 4: "createServer not a fresh-instance factory" }[error.code] ?? "import failed";
           return reject(new Error(`${reason}: ${stderr}`));
         }
-        assert.doesNotMatch(stderr ?? "", /\[jev-mcp\] ready/, "an import entry must not print the boot banner");
+        assert.doesNotMatch(stderr ?? "", /\[discern-mcp\] ready/, "an import entry must not print the boot banner");
         resolve();
       },
     );
@@ -47,16 +47,16 @@ test("the root and /server entries import without booting a transport", async ()
 
 test("the bin entry still boots and prints the ready banner", async () => {
   await new Promise((resolve, reject) => {
-    // Force the stdio branch: an ambient JEV_MCP_TRANSPORT=http would point
+    // Force the stdio branch: an ambient DISCERN_MCP_TRANSPORT=http would point
     // this smoke test at the HTTP path and its HOST/token requirements.
     const child = spawn(process.execPath, [rootEntry], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, JEV_MCP_TRANSPORT: "stdio" },
+      env: { ...process.env, DISCERN_MCP_TRANSPORT: "stdio" },
     });
     let stderr = "";
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
-      if (stderr.includes("[jev-mcp] ready")) {
+      if (stderr.includes("[discern-mcp] ready")) {
         child.kill("SIGTERM");
         resolve();
       }

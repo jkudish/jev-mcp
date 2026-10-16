@@ -62,7 +62,7 @@ test("buildDecision frames the tool call as untrusted facts under the policy", (
 });
 
 test("mapDecision denies only confident blocks and never fabricates", () => {
-  const rec = (selected, probabilities, extra = {}) => ({ tool: "jev_decide", recommendation: { selected, escaped: false, confidence: 0.9, probabilities, ...extra } });
+  const rec = (selected, probabilities, extra = {}) => ({ tool: "discern_decide", recommendation: { selected, escaped: false, confidence: 0.9, probabilities, ...extra } });
   const policy = "No force pushes. More detail follows.";
   const denied = mapDecision(rec("block", { proceed: 0.05, block: 0.91, ask_user: 0.02, investigate: 0.01, none: 0.01 }), { policy });
   assert.equal(denied.permissionDecision, "deny");
@@ -80,7 +80,7 @@ test("mapDecision denies only confident blocks and never fabricates", () => {
   assert.equal(mapDecision(askUser, { policy, askEnabled: true }).permissionDecision, "ask");
   assert.equal(mapDecision(rec("investigate", {}, { escaped: true }), { policy }), null);
   assert.equal(mapDecision(rec(null, null, { escaped: null, probabilities: null, status: "invalid_response" }), { policy }), null);
-  assert.equal(mapDecision({ tool: "jev_classify" }, { policy }), null);
+  assert.equal(mapDecision({ tool: "discern_classify" }, { policy }), null);
   assert.equal(mapDecision(null, { policy }), null);
   // A missing probabilities object cannot prove a block.
   assert.equal(mapDecision(rec("block", undefined), { policy }), null);
@@ -96,7 +96,7 @@ test("harnessOutput wraps the verdict in the PreToolUse protocol", () => {
 
 const decideResponse = (selected) => ({
   content: [{ type: "text", text: JSON.stringify({
-    tool: "jev_decide", model: "mock-only",
+    tool: "discern_decide", model: "mock-only",
     recommendation: { selected, escaped: selected === "investigate", confidence: 0.9, probabilities: {
       proceed: selected === "proceed" ? 0.95 : 0.05, block: selected === "block" ? 0.95 : 0.05,
       ask_user: 0, investigate: selected === "investigate" ? 0.95 : 0, none: 0,
@@ -104,7 +104,7 @@ const decideResponse = (selected) => ({
   }) }],
 });
 
-test("judge builds one jev_decide call and maps its verdict", async () => {
+test("judge builds one discern_decide call and maps its verdict", async () => {
   const calls = [];
   const decision = await judge(async ({ arguments: args }) => {
     calls.push(args);

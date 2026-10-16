@@ -1,29 +1,27 @@
 #!/usr/bin/env bash
-# Amp orb setup for jev-mcp, the primary repository of the Amp "Jev" project.
+# Amp orb setup for Discern MCP and its optional browser checkout.
 #
-# In project orbs the additional repository (jev-browser) is checked out under
-# ../repos/jev-browser; this script installs and builds both. When jev-mcp is
-# cloned standalone (no sibling jev-browser checkout), the browser repo is
-# skipped and only jev-mcp is prepared.
+# Supports the Discern checkout names and the legacy Jev names during migration.
+# Standalone MCP checkouts skip the browser install when no sibling is present.
 #
 # The script is idempotent: safe to run repeatedly; warm runs converge fast.
 set -euo pipefail
 
-log() { printf '[jev setup %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
+log() { printf '[discern setup %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-# Locate the jev-browser checkout (Amp multi-repo projects use ../repos/).
+# Prefer the new checkout name; Amp multi-repo projects use ../repos/.
 browser=""
-for candidate in "$root/../repos/jev-browser" "$root/../jev-browser"; do
+for candidate in "$root/../repos/discern-browser" "$root/../discern-browser" "$root/../repos/jev-browser" "$root/../jev-browser"; do
   if [ -f "$candidate/package.json" ]; then
     browser="$(cd "$candidate" && pwd)"
     break
   fi
 done
 
-# jev-mcp requires Node >= 22.
+# Discern MCP requires Node >= 22.
 node_version="$(node --version 2>/dev/null || true)"
 node_major="$(printf '%s' "$node_version" | sed 's/^v\([0-9]*\).*/\1/')"
 if [ "${node_major:-0}" -lt 22 ]; then
@@ -31,19 +29,19 @@ if [ "${node_major:-0}" -lt 22 ]; then
   exit 1
 fi
 
-log "installing jev-mcp dependencies"
+log "installing Discern MCP dependencies"
 npm ci --no-fund --no-audit
 
-log "building jev-mcp"
+log "building Discern MCP"
 npm run build
 
 if [ -n "$browser" ]; then
-  log "installing jev-browser dependencies at $browser (first run downloads Chromium)"
+  log "installing Discern Browser dependencies at $browser (first run downloads Chromium)"
   (cd "$browser" && npm ci --no-fund --no-audit)
-  log "building jev-browser"
+  log "building Discern Browser"
   (cd "$browser" && npm run build)
 else
-  log "no jev-browser checkout found; skipped (standalone jev-mcp setup)"
+  log "no browser checkout found; skipped (standalone Discern MCP setup)"
 fi
 
 log "done"

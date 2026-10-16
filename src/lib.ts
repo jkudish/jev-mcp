@@ -1,6 +1,6 @@
 // Pure helpers — no API access, fully unit-testable.
 
-/** Max candidates in one jev_find call. TypeSafe Choice supports up to 255 options. */
+/** Max candidates in one discern_find call. TypeSafe Choice supports up to 255 options. */
 import { Worker } from "node:worker_threads";
 
 export const MAX_CANDIDATES = 250;
@@ -60,7 +60,7 @@ export function truncate(text: string, maxChars: number): string {
   return text.slice(0, maxChars) + " […truncated]";
 }
 
-/** Map a jev_verify relation answer to a verdict label (citation-check cookbook). */
+/** Map a discern_verify relation answer to a verdict label (citation-check cookbook). */
 export const RELATION_TO_VERDICT: Record<string, string> = {
   supports: "verified",
   contradicts: "contradicted",
@@ -68,7 +68,7 @@ export const RELATION_TO_VERDICT: Record<string, string> = {
 };
 
 /**
- * jev_verify decomposition (docs.typesafe.ai/primitives: split a judgment into questions, combine in code): besides
+ * discern_verify decomposition (docs.typesafe.ai/primitives: split a judgment into questions, combine in code): besides
  * the relation, each claim gets "does the evidence report on this claim's own subject?". A contradiction stands only
  * at or above this probability; below it the evidence is about something else and says nothing about the claim.
  */
@@ -125,10 +125,10 @@ export function rankCandidates<T extends { id: string }>(
     .map(({ candidate }) => candidate);
 }
 
-/** Max classes per jev_classify call, bounded by the Choice option limit. */
+/** Max classes per discern_classify call, bounded by the Choice option limit. */
 export const MAX_CLASSES = 250;
 
-/** Max items per jev_classify call; each becomes one Choice question in one request. */
+/** Max items per discern_classify call; each becomes one Choice question in one request. */
 export const MAX_ITEMS = 64;
 
 /** Item text cap; classification works on bounded excerpts, not whole documents. */
@@ -154,10 +154,10 @@ export function classificationDecision(
   return topProbability >= autoAccept && margin >= minimumMargin ? "auto" : "review";
 }
 
-/** Max candidates per jev_decide call. */
+/** Max candidates per discern_decide call. */
 export const MAX_CANDIDATES_DECIDE = 6;
 
-/** Max requirements per jev_decide call. */
+/** Max requirements per discern_decide call. */
 export const MAX_REQUIREMENTS = 3;
 
 /** Escape-hatch options appended to the Choice criteria so the model can decline to rank. */
@@ -181,34 +181,34 @@ export function contradictsRecommendation(
     .map((c) => c.requirement);
 }
 
-/** Max candidates for jev_rerank, bounded by the Choice option limit. */
+/** Max candidates for discern_rerank, bounded by the Choice option limit. */
 export const MAX_RERANK_CANDIDATES = 250;
 
-/** Aggregate candidate-text budget for jev_rerank (characters, across all candidates). */
+/** Aggregate candidate-text budget for discern_rerank (characters, across all candidates). */
 export const MAX_RERANK_TOTAL_CHARS = 100_000;
 
-/** Max propositions for jev_noul (independent Noul questions). */
+/** Max propositions for discern_noul (independent Noul questions). */
 export const MAX_PROPOSITIONS = 64;
 
-/** Max characters per jev_noul proposition. */
+/** Max characters per discern_noul proposition. */
 export const MAX_PROPOSITION_CHARS = 2000;
 
-/** Aggregate proposition plus context budget for jev_noul (characters). */
+/** Aggregate proposition plus context budget for discern_noul (characters). */
 export const MAX_NOUL_TOTAL_CHARS = 150_000;
 
-/** Max aspects for jev_compare (independent per-aspect Choices). */
+/** Max aspects for discern_compare (independent per-aspect Choices). */
 export const MAX_COMPARE_ASPECTS = 10;
 
-/** Max fields for jev_extract per call. */
+/** Max fields for discern_extract per call. */
 export const MAX_EXTRACT_FIELDS = 32;
 
-/** Max records per jev_audit call, so one request stays bounded. */
+/** Max records per discern_audit call, so one request stays bounded. */
 export const MAX_AUDIT_RECORDS = 32;
 
-/** Per-record request cap (characters) in jev_audit; requests are instructions, not documents. */
+/** Per-record request cap (characters) in discern_audit; requests are instructions, not documents. */
 export const MAX_AUDIT_REQUEST_CHARS = 500;
 
-/** Per-record value cap (characters) in jev_audit; values are extracted atoms, not documents. */
+/** Per-record value cap (characters) in discern_audit; values are extracted atoms, not documents. */
 export const MAX_AUDIT_VALUE_CHARS = 2_000;
 
 /** Max regex candidates per field before the set is flagged truncated. */
@@ -217,13 +217,13 @@ export const MAX_EXTRACT_CANDIDATES = 20;
 /** A single regex match longer than this is skipped and flagged, never silently truncated. */
 export const MAX_EXTRACT_CANDIDATE_CHARS = 2_000;
 
-/** Aggregate candidate-preview budget for jev_extract (characters, across all fields). */
+/** Aggregate candidate-preview budget for discern_extract (characters, across all fields). */
 export const MAX_EXTRACT_TOTAL_CHARS = 50_000;
 
 /** Hard per-field deadline for caller-supplied regex execution in a worker. */
 export const REGEX_TIMEOUT_MS = 1_000;
 
-/** The three pairwise relations jev_compare judges overall. */
+/** The three pairwise relations discern_compare judges overall. */
 export const COMPARE_RELATIONS: Record<string, string> = {
   same_fact: "Both passages state the same underlying fact or claim",
   contradicts: "The passages state opposing facts about the same subject",
@@ -254,24 +254,24 @@ export function rerankByScore<T extends object>(candidates: T[], scores: number[
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Patch review and completion gate (jev_review / jev_gate)
+// Patch review and completion gate (discern_review / discern_gate)
 // Question design adapted from burnigtm/jev-mcp (MIT) via PR #2 by rimusz;
 // thresholds are parameters and arithmetic stays here.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Max completion claims per jev_gate call; each claim adds one Choice question. */
+/** Max completion claims per discern_gate call; each claim adds one Choice question. */
 export const MAX_GATE_CLAIMS = 16;
 
-/** Max evidence items per jev_gate call, so one request stays bounded. */
+/** Max evidence items per discern_gate call, so one request stays bounded. */
 export const MAX_GATE_EVIDENCE_ITEMS = 16;
 
-/** Aggregate evidence budget (characters) per jev_gate call, before per-item truncation. */
+/** Aggregate evidence budget (characters) per discern_gate call, before per-item truncation. */
 export const MAX_GATE_EVIDENCE_CHARS = 200_000;
 
 /** Per-document cap (characters) for request, diff, tests, and evidence texts. */
 export const MAX_REVIEW_DOC_CHARS = 50_000;
 
-/** Max files in one per-file review (jev_review / jev_gate files mode). */
+/** Max files in one per-file review (discern_review / discern_gate files mode). */
 export const MAX_REVIEW_FILES = 16;
 
 /** Combined-state budget (characters): request + tests + all file diffs for one per-file review. */
@@ -280,7 +280,7 @@ export const MAX_REVIEW_FILES_TOTAL_CHARS = 200_000;
 /** Per-file path cap (characters) in per-file review; paths are identifiers, not documents. */
 export const MAX_REVIEW_FILE_PATH_CHARS = 500;
 
-/** Per-claim cap (characters) in jev_gate; claims are bounded assertions. */
+/** Per-claim cap (characters) in discern_gate; claims are bounded assertions. */
 export const MAX_CLAIM_CHARS = 2_000;
 
 /**
@@ -312,7 +312,7 @@ export const REVIEW_WEIGHTS = {
   blast_radius: 0.15,
 } as const;
 
-/** The three claim verdicts jev_gate checks, mirroring jev_verify's evidence relation. */
+/** The three claim verdicts discern_gate checks, mirroring discern_verify's evidence relation. */
 export const VERIFY_CLAIM_CRITERIA: Record<string, string> = {
   verified: "The evidence clearly supports the claim",
   contradicted: "The evidence contradicts the claim",
@@ -424,7 +424,7 @@ export function worstAction(actions: PolicyAction[]): PolicyAction {
 
 export type ReviewEvidenceInput = string | { id?: string; text: string } | Array<{ id?: string; text: string }>;
 
-/** Normalize evidence to {id,text} items with unique ids, same shape as jev_verify. */
+/** Normalize evidence to {id,text} items with unique ids, same shape as discern_verify. */
 export function normalizeEvidence(raw: ReviewEvidenceInput): Array<{ id: string; text: string }> {
   const items =
     typeof raw === "string" ? [{ id: "evidence", text: raw }] : Array.isArray(raw) ? raw : [raw];
