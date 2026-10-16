@@ -71,6 +71,7 @@ test("embedded image localization preserves bytes and keeps the hidden alias cal
     assert.ok(!JSON.stringify(result).includes(image.data_base64));
     const unsupported = await client.callTool({ name: "discern_locate_image", arguments: { ...args, model: "jev-1.13.0" } });
     assert.equal(unsupported.isError, true);
+    assert.match(unsupported.content[0].text, /does not support.*Box/);
     assert.equal(calls, 1);
   } finally {
     await client.close();
