@@ -26,13 +26,14 @@ const positiveInt = (value: string | undefined): number | undefined => {
   return Number.isSafeInteger(raw) && raw > 0 ? raw : undefined;
 };
 
-const TRANSPORT_FAILURES = new Set(["request_failed", "rate_limited", "unavailable", "timeout", "configuration_error"]);
+const TRANSPORT_FAILURES = new Set(["request_failed", "rate_limited", "unavailable", "timeout", "configuration_error", "invalid_image", "unsupported_feature"]);
 
 export async function askDiscern(
   state: unknown,
   questions: Record<string, unknown>,
   model: string,
   signal?: AbortSignal,
+  requireValidBundle = false,
 ): Promise<AskResult> {
   const env = discernEnv();
   // Whole-request deadline (all attempts) and total attempts, overridable for tests and tight hosts.
@@ -62,6 +63,7 @@ export async function askDiscern(
       (result.code === "answer_id_mismatch" && Object.keys(reply.answers).some((id) => !Object.hasOwn(questions, id)))) {
     return { answers: {}, usage: { input_tokens: 0, output_tokens: 0 }, provider, model: answeredModel };
   }
+  if (requireValidBundle) return { answers: {}, usage: reply.usage, provider, model: reply.model };
   // The package's rejection is batch-wide; each tool's own guards decide which
   // judgments are valid. Answers of the wrong type (including refusals) are
   // dropped, so they read as missing and fail closed as invalid_response.

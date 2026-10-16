@@ -11,6 +11,13 @@ jev-mcp is now **discern-mcp**. "Jev" names TypeSafe's model, and the server now
 - Environment variables are `DISCERN_*`. The documented `JEV_*` names still work, each printing one stderr deprecation line; other `JEV_*` variables are ignored. Setting both names to different values fails at startup with an error that names both variables and never their values.
 - The compatibility package `@jkudish/jev-mcp` 1.0.0 runs discern-mcp with `DISCERN_TOOL_NAMES=jev`, so existing `npx @jkudish/jev-mcp` configs and permission allowlists keep working. It re-exports `./server` and ships no skill.
 
+### Image evidence and localization
+
+- `discern_verify` accepts mixed text/image evidence with source IDs; image calls require review by default unless `auto_accept` is explicit. `discern_decide` accepts named shared `images` without changing candidate/requirement policy.
+- New `discern_locate_image` (`jev_locate_image` alias) batches presence, uniqueness and Box on supported Jev 1.14 routes. It exposes normalized geometry only when all judgments validate and meet the visible provisional thresholds. Absent/uncertain/invalid responses expose no box. Every result is `action:review`; Browser gains no coordinate actions.
+- One strict PNG/JPEG base64 input contract: no URL/path reads, 1 MiB/image, 2 MiB aggregate decoded, 4 images, 4 MiB image-bearing arguments. No enable flag or experimental SDK entry. Availability depends on the configured provider, protocol and model; unsupported features fail before inference. Upstream vision is experimental and live evaluation is pending before release.
+- Both tool-name modes list 13 tools. Existing text-only behavior, HTTP ingress limits, defaults, and aliases remain unchanged. Images leave the host for the configured provider under its retention policy, including SubQ's indefinite default retention.
+
 ### Providers
 
 - SubQ Decisions: explicit-only `DISCERN_PROVIDER=subq` with `DISCERN_SUBQ_API_KEY` or `SUBQ_API_KEY`, optional `DISCERN_SUBQ_BASE_URL`. Both default aliases map to `subq-snap-preview`; results identify the effective model. Native inputs and fractional scores are preserved. Larger batches use serial 16-question chunks under one deadline; a bad chunk invalidates the whole call, never exposes partial judgments, and stops remaining requests. SubQ retains data indefinitely by default; organization ZDR requires contacting SubQ. Existing policy thresholds are unchanged.

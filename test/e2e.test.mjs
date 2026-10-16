@@ -51,7 +51,7 @@ function payload(result) {
   return JSON.parse(block.text);
 }
 
-test("lists the twelve tools", { skip: !hasKey }, async () => {
+test("lists the thirteen tools", { skip: !hasKey }, async () => {
   await withClient(async (client) => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
@@ -63,6 +63,7 @@ test("lists the twelve tools", { skip: !hasKey }, async () => {
       "discern_extract",
       "discern_find",
       "discern_gate",
+      "discern_locate_image",
       "discern_noul",
       "discern_rerank",
       "discern_review",

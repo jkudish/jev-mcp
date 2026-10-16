@@ -11,9 +11,10 @@ Fast, cheap, typed judgments as MCP tools, answered by TypeSafe's Jev model by d
 
 > **Renamed.** This package was `@jkudish/jev-mcp` before 1.0. Existing setups keep working through 1.x; see [Migrating from jev-mcp](#migrating-from-jev-mcp).
 
-Give your agent twelve judgment tools:
+Give your agent thirteen judgment tools:
 
 - `discern_verify` checks claims against evidence.
+- `discern_locate_image` proposes a reviewed bounding box for one unambiguous image target.
 - `discern_screen` judges content before it enters context.
 - `discern_noul` returns a calibrated probability for a stated proposition.
 - `discern_find` picks the best candidate by meaning.
@@ -153,7 +154,7 @@ The server itself speaks plain HTTP: terminate TLS at a reverse proxy or load ba
 
 The `discern-mcp` bin boots a transport when run; importing the package never does. To run the tools in-process (an agent hook, a larger server, a test harness):
 
-- `import { createServer } from "@jkudish/discern-mcp"` starts no transport: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all twelve, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/discern-mcp/server` is an explicit alias for the same entry.
+- `import { createServer } from "@jkudish/discern-mcp"` starts no transport: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all thirteen, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/discern-mcp/server` is an explicit alias for the same entry.
 - `MODEL` is exported alongside it, resolved from `DISCERN_MCP_MODEL` at import time (default `latest`, each provider's current default model), so embedders report the same model the CLI serves.
 - `createServer({ toolNames })` chooses which tool names `tools/list` shows (`"discern"` or `"jev"`); without it, `DISCERN_TOOL_NAMES` decides via the exported `resolveToolNames()`. The library never changes `process.env`: it reads a copy with the `JEV_*` aliases applied, and `createServer()` throws if a `JEV_` and `DISCERN_` pair conflicts. Only the `discern-mcp` bin writes the aliases into `process.env`.
 - `@jkudish/discern-mcp/bin` is the bin entry; importing it starts a transport, exactly like running `discern-mcp`.
@@ -222,6 +223,54 @@ A malformed or missing relation answer fails closed per claim:
 - A missing or malformed subject answer yields `same_subject: null`. A contradiction keeps its relation verdict but requires `review`, regardless of `auto_accept`; verified and unsupported relations retain their confidence-based routing.
 - Subject-aware verification applies to `discern_verify`, not `discern_gate`. It adds one probability question per claim, not another API request. The replay figures in [#53](https://github.com/jkudish/discern-mcp/issues/53) are the contributor's private experiment, not an independently reproduced accuracy benchmark.
 - For quote-level citation checks, match quotes against the source in code first and send only the surviving claims. See the [citation-check cookbook](https://docs.typesafe.ai/cookbooks/citation_check).
+
+### Image evidence and discern_locate_image (1.0, unreleased)
+
+`discern_verify` accepts evidence items `{id?,text?,image?}`, with text or an image required. Strings and text-only evidence keep working. Mixed items share the existing source IDs; `supporting_evidence` can name an image item. Image calls default to `action:"review"`; only an explicitly supplied `auto_accept` permits the usual confidence policy. All image judgments carry an experimental-vision warning.
+
+`discern_decide` accepts optional `images:[{id,image}]`, with unique IDs that evidence or candidate descriptions can name. These are shared evidence; candidate IDs, requirements, escape hatches, and contradiction handling stay unchanged. Other existing tools, including Gate and Noul, remain text-only.
+
+Use one strict image envelope everywhere:
+
+```jsonc
+{ "mime_type": "image/png", "data_base64": "<canonical standard base64 of the image bytes>" }
+```
+
+PNG/JPEG only. No URLs, paths, data-URL prefixes, uploaded file IDs, resizing, or EXIF correction. Limits: 1 MiB/image, 2 MiB aggregate decoded, 4 images, 4 MiB serialized image-bearing arguments. Base64 strings are checked before decoding; signatures must match MIME. HTTP retains its 4 MiB ingress ceiling; stdio checks tool arguments after the MCP library has parsed the frame. Full decoding and pixel-dimension checks remain the provider's responsibility. For TypeSafe, prepare images at 280–1568 pixels per side. No pixels appear in tool results or provider error messages.
+
+Supplying images sends them to your configured provider under its retention policy, without a server enable flag. **SubQ retains images indefinitely by default.** No automatic model/provider fallback occurs. Unsupported features are tool errors before inference, not semantic absence. Upstream vision/Box contracts are experimental; local protocol tests do not establish visual accuracy. Live image evaluation remains a release gate.
+
+| Configured route | Image evidence | Localization |
+| --- | --- | --- |
+| TypeSafe Jev 1.13/1.14 and known image aliases | Up to 4 | Explicit `jev-1.14.0` |
+| OpenRouter Jev 1.13/1.14 and known image aliases | Up to 4 | Explicit `typesafe/jev-1.14` |
+| OpenAI Decisions `gpt-6-luna` | Up to 4 shared state images | No |
+| SubQ `subq-snap-preview` | 1 shared state image initially | No |
+| Cloudflare `clef` / `clef-flash` | 1; at most 64 questions and 2,000 serialized state bytes | No |
+| Vercel `typesafe-ai/jev-1.13.0` / `typesafe-ai/jev-1.14.0` | 1 via decision protocol; existing ZDR option preserved | No, including 1.14 |
+| Cloudflare `typesafe/jev`, Vercel generic alias, compatible endpoint | Text only | No |
+
+See the [SDK capability matrix](https://github.com/jkudish/jev-agent-tools/blob/release/discern-1.0/README.md#image-judgments-and-box-10-unreleased) for exact IDs and placement restrictions. Provider support includes its protocol, not just a model version. Existing default provider/model choices do not change.
+
+To localize, call `discern_locate_image` (or its `jev_locate_image` compatibility alias):
+
+```jsonc
+{
+  "image": { "mime_type": "image/png", "data_base64": "<image bytes as base64>" },
+  "target": "the red mug on the right",
+  "context": "Optional short context, treated as evidence",
+  "model": "jev-1.14.0"
+}
+```
+
+The optional model override stays on the configured provider. Target is limited to 1,000 characters and context to 2,000. One request asks presence, uniqueness, and Box independently. All three must validate before applying policy:
+
+- `located`: presence ≥ 0.8, uniqueness ≥ 0.8, Box confidence ≥ 0.8. Returns `{top,bottom,left,right}` normalized to `[0,1]`, with strictly ordered edges.
+- `absent`: presence ≤ 0.2, with a fully valid bundle. Returns `box:null` even if Box confidence is high.
+- `uncertain`: any other valid bundle, including null/missing Box confidence. Returns `box:null` and a reason such as `ambiguous_target`.
+- `invalid_response`: malformed/missing judgments, invalid geometry, usage, or identity. Returns `box:null`, never absence.
+
+Every result includes `action:"review"`, the thresholds, raw presence/uniqueness probabilities, Box confidence, provider/model, usage, and a SHA-256 `image_id`. The digest identifies content, not screenshot freshness. These provisional thresholds are not calibrated for production. A Box alone cannot establish presence or permission to act. Discern Browser remains DOM-driven and never clicks these coordinates.
 
 ### discern_screen
 
@@ -536,7 +585,7 @@ Audit extracted values against the text they claim to come from, before the valu
 
 #### Multimodal intake
 
-The judgment models read text only: state is a string, JSON object, or array, and images, audio, and video are not supported (pre-process to text first, per the TypeSafe docs). Multimodal judgment therefore lands as a cascade, with the text artifacts cross-checked by the text-only judge:
+`discern_verify` and `discern_decide` can judge supplied images on supported routes; `discern_locate_image` proposes geometry. These do not provide free-form transcription. For extracted values, audio/video, or text-only routes, use a cascade that cross-checks the extracted text:
 
 1. **Extract** with your host model: a vision or ASR model produces a dense transcript of the image, scan, or recording, plus the structured values you want.
 2. **Screen** the transcript with `discern_screen`: transcripts of fetched content are untrusted text and get the injection screen before anything else. The screen is advice you enforce: honor `block` and `review` before passing the transcript onward. It protects what enters your context, not the vision or ASR model, which has already consumed the untrusted material.
@@ -817,7 +866,7 @@ With `AI_GATEWAY_API_KEY` set, judgments run through the Vercel AI Gateway at `t
 Set `DISCERN_PROVIDER=subq` and `DISCERN_SUBQ_API_KEY` (or `SUBQ_API_KEY`). `latest` and `jev-latest` map to `subq-snap-preview`; `DISCERN_MCP_MODEL` can pin an explicit ID. Results report `provider: "subq"` and the effective response model.
 
 - [Snap is in public preview](https://docs.subq.ai/endpoints/decisions-api/), with its own calibration. Existing thresholds stay unchanged; evaluate labeled cases before relying on them for policy.
-- Native structured state, instructions and criteria are preserved, as are probabilities and fractional scores. Limits: 255 Choice options, 10 Score levels, 100-character question IDs, 393,216-token context (near-limit requests may fail). Images are not exposed by this adapter.
+- Native structured state, instructions and criteria are preserved, as are probabilities and fractional scores. Limits: 255 Choice options, 10 Score levels, 100-character question IDs, 393,216-token context (near-limit requests may fail). Image evidence uses the bounded shared-state contract above, repeated per chunk.
 - We observed a 16-question request limit. Larger calls use serial chunks under one shared deadline, repeating the state and summing usage. A failed or malformed chunk invalidates the whole call's judgments; no partial answers are exposed. Earlier chunks may still be billed. Inconsistent effective models fail the call.
 - This all-or-nothing validation applies to **every SubQ call**, including 16 or fewer questions: one invalid or refused answer marks all judgments in that call `invalid_response`. Siblings are not preserved as they are on OpenAI.
 - Published pricing is $0.05 per million input tokens, output free. Batch latency and input usage grow with repeated state.
