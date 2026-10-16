@@ -113,6 +113,7 @@ test("--http localizes images in both protocol eras and rejects image/auth/body 
         const large = Buffer.alloc(1024 * 1024 + 1); bytes.copy(large);
         const invalid = await client.callTool({ name: "discern_locate_image", arguments: { ...args, image: { ...image, data_base64: large.toString("base64") } } });
         assert.equal(invalid.isError, true);
+        assert.match(invalid.content[0].text, /decoded bytes exceed 1 MiB/);
       } finally { await client.close(); }
     }
     assert.equal(calls, 2);
