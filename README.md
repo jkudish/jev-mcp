@@ -238,7 +238,7 @@ Use one strict image envelope everywhere:
 
 PNG/JPEG only. No URLs, paths, data-URL prefixes, uploaded file IDs, resizing, or EXIF correction. Limits: 1 MiB/image, 2 MiB aggregate decoded, 4 images, 4 MiB serialized image-bearing arguments. Base64 strings are checked before decoding; signatures must match MIME. HTTP retains its 4 MiB ingress ceiling; stdio checks tool arguments after the MCP library has parsed the frame. Full decoding and pixel-dimension checks remain the provider's responsibility. For TypeSafe, prepare images at 280–1568 pixels per side. No pixels appear in tool results or provider error messages.
 
-Supplying images sends them to your configured provider under its retention policy, without a server enable flag. **SubQ retains images indefinitely by default.** No automatic model/provider fallback occurs. Unsupported features are tool errors before inference, not semantic absence. Upstream vision/Box contracts are experimental; local protocol tests do not establish visual accuracy. Live image evaluation remains a release gate.
+Supplying images sends them to your configured provider under its retention policy, without a server enable flag. **SubQ retains images indefinitely by default.** No automatic model/provider fallback occurs. Unsupported features are tool errors before inference, not semantic absence. Upstream vision/Box contracts are experimental; local protocol tests do not establish visual accuracy. The SDK's synthetic live results are linked below; Vercel remains account-blocked and live-unverified.
 
 | Configured route | Image evidence | Localization |
 | --- | --- | --- |
@@ -251,6 +251,10 @@ Supplying images sends them to your configured provider under its retention poli
 | Cloudflare `typesafe/jev`, Vercel generic alias, compatible endpoint | Text only | No |
 
 See the [SDK capability matrix](https://github.com/jkudish/jev-agent-tools/blob/release/discern-1.0/README.md#image-judgments-and-box-10-unreleased) for exact IDs and placement restrictions. Provider support includes its protocol, not just a model version. Existing default provider/model choices do not change.
+
+The October 15, 2026 (Pacific) synthetic evaluation passed 11/11 cases on each TypeSafe Jev version and OpenRouter Jev 1.14 after correcting its effective-snapshot check, and 7/7 on SubQ. OpenAI passed 7/9; Clef and Clef-flash each passed 4/7. Those strict probability misses remain recorded, not recalibrated away. Vercel image and text controls both returned account-restricted HTTP 403. See the [SDK live observations](https://github.com/jkudish/jev-agent-tools/blob/release/discern-1.0/README.md#evaluate-a-configured-image-route) for scenarios and limitations.
+
+Five additional real stdio MCP calls passed through the packed SDK to live providers: TypeSafe localization returned `located`, `absent`, and `uncertain` for one/no/two red targets, with no box for the latter two; OpenRouter image verification returned `verified` with `action:"review"`; SubQ image decision selected the red candidate. Offline HTTP coverage uses both MCP protocol eras and verifies 401 auth, 413 body, and decoded-image-limit rejections without extra inference. Embedded coverage checks the hidden alias and unsupported-version rejection. This is synthetic integration evidence, not a production accuracy or visual-injection guarantee.
 
 To localize, call `discern_locate_image` (or its `jev_locate_image` compatibility alias):
 
