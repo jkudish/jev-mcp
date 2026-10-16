@@ -121,8 +121,20 @@ test("--http localizes images in both protocol eras and rejects image/auth/body 
     const denied = await fetch(running.url, { method: "POST", headers, body: JSON.stringify(rpc) });
     assert.equal(denied.status, 401); await denied.text();
     rpc.params.arguments = { ...args, context: "x".repeat(4 * 1024 * 1024) };
-    const oversized = await fetch(running.url, { method: "POST", headers: { ...headers, Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(rpc) });
-    assert.equal(oversized.status, 413); await oversized.text();
+    // The server rejects Content-Length before reading. Send headers only:
+    // fetch can lose the 413 to EPIPE while still uploading the rejected body.
+    const oversized = await new Promise((resolve, reject) => {
+      const req = request(running.url, { method: "POST", headers: {
+        ...headers, Authorization: `Bearer ${TOKEN}`, "Content-Length": Buffer.byteLength(JSON.stringify(rpc)),
+      } }, res => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode));
+      });
+      req.on("error", reject);
+      req.setTimeout(5000, () => req.destroy(new Error("oversized request headers were not rejected")));
+      req.end();
+    });
+    assert.equal(oversized, 413);
     assert.equal(calls, 2);
     assert.equal((await fetch(new URL("/health", running.url))).status, 200);
   } finally {
