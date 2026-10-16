@@ -1,4 +1,4 @@
-import { request } from "node:http";
+import { createServer as createMockServer, request } from "node:http";
 import { connect } from "node:net";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -70,6 +70,65 @@ test("--http serves 2025-era and 2026-07-28 clients statelessly behind a bearer 
     assert.deepEqual(modern.names, legacy.names);
   } finally {
     await stop();
+  }
+});
+
+test("--http localizes images in both protocol eras and rejects image/auth/body violations before inference", async () => {
+  const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 17]);
+  const image = { mime_type: "image/png", data_base64: bytes.toString("base64") };
+  const box = { top: 0.13, bottom: 0.72, left: 0.61, right: 0.89 };
+  let calls = 0;
+  const provider = createMockServer((req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; });
+    req.on("end", () => {
+      calls++;
+      const body = JSON.parse(raw);
+      assert.equal(body.assets[body.state.image].data_base64, image.data_base64);
+      assert.equal(body.questions.location.type, "box");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ model: "jev-1.14.0", usage: { input_tokens: 11, output_tokens: 7 }, answers: {
+        present: { type: "noul", noul: 0.94 }, unique: { type: "noul", noul: 0.92 },
+        location: { type: "box", box, confidence: 0.91 },
+      } }));
+    });
+  });
+  await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
+  let stop;
+  try {
+    const running = await startHttp({ DISCERN_MCP_AUTH_TOKEN: TOKEN, TYPESAFE_BASE_URL: `http://127.0.0.1:${provider.address().port}` });
+    stop = running.stop;
+    const args = { image, target: "the red rectangle", model: "jev-1.14.0" };
+    for (const versionNegotiation of [undefined, { mode: { pin: "2026-07-28" } }]) {
+      const client = new Client({ name: "http-image-test", version: "1.0.0" }, versionNegotiation ? { versionNegotiation } : {});
+      await client.connect(new StreamableHTTPClientTransport(running.url, { requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } } }));
+      try {
+        const result = await client.callTool({ name: "discern_locate_image", arguments: args });
+        assert.notEqual(result.isError, true);
+        const body = JSON.parse(result.content[0].text);
+        assert.equal(body.status, "located"); assert.equal(body.action, "review");
+        assert.deepEqual(body.box, box); assert.equal(body.model, "jev-1.14.0");
+        assert.deepEqual(body.usage, { input_tokens: 11, output_tokens: 7 });
+        assert.ok(!JSON.stringify(result).includes(image.data_base64));
+        const large = Buffer.alloc(1024 * 1024 + 1); bytes.copy(large);
+        const invalid = await client.callTool({ name: "discern_locate_image", arguments: { ...args, image: { ...image, data_base64: large.toString("base64") } } });
+        assert.equal(invalid.isError, true);
+      } finally { await client.close(); }
+    }
+    assert.equal(calls, 2);
+    const rpc = { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "discern_locate_image", arguments: args } };
+    const headers = { "Content-Type": "application/json", Accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" };
+    const denied = await fetch(running.url, { method: "POST", headers, body: JSON.stringify(rpc) });
+    assert.equal(denied.status, 401); await denied.text();
+    rpc.params.arguments = { ...args, context: "x".repeat(4 * 1024 * 1024) };
+    const oversized = await fetch(running.url, { method: "POST", headers: { ...headers, Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(rpc) });
+    assert.equal(oversized.status, 413); await oversized.text();
+    assert.equal(calls, 2);
+    assert.equal((await fetch(new URL("/health", running.url))).status, 200);
+  } finally {
+    if (stop) await stop();
+    provider.closeAllConnections();
+    await new Promise(resolve => provider.close(resolve));
   }
 });
 
