@@ -26,7 +26,7 @@ test("tools an embedder registers are listed alongside the advertised prefix", a
     assert.ok(names.includes("my_custom"), `${toolNames}: ${names}`);
     assert.ok(names.includes(shown));
     assert.ok(!names.includes(hidden));
-    assert.equal(names.length, 13);
+    assert.equal(names.length, 14);
   }
 });
 

@@ -14,7 +14,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const compatSource = join(repoRoot, "compat", "jev-mcp");
-const SUFFIXES = ["audit", "classify", "compare", "decide", "extract", "find", "gate", "noul", "rerank", "review", "screen", "verify"];
+const SUFFIXES = ["audit", "classify", "compare", "decide", "extract", "find", "gate", "locate_image", "noul", "rerank", "review", "screen", "verify"];
 const names = (prefix) => SUFFIXES.map((suffix) => `${prefix}_${suffix}`);
 
 let installRoot;

@@ -62,7 +62,7 @@ test("--http serves 2025-era and 2026-07-28 clients statelessly behind a bearer 
 
     const legacy = await listTools(url);
     assert.equal(legacy.era, "legacy");
-    assert.equal(legacy.names.length, 12);
+    assert.equal(legacy.names.length, 13);
     assert.ok(legacy.names.includes("discern_verify"));
 
     const modern = await listTools(url, { mode: { pin: "2026-07-28" } });
@@ -143,7 +143,7 @@ test("--http advertises a static tool list and refuses subscriptions/listen with
         (error) => /subscription|limit|not/i.test(String(error?.message ?? error)),
       );
       // ...and the refused listener must not occupy the single concurrency slot.
-      assert.equal((await client.listTools()).tools.length, 12);
+      assert.equal((await client.listTools()).tools.length, 13);
     } finally {
       await client.close();
     }

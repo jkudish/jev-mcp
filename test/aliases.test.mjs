@@ -15,7 +15,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const serverPath = fileURLToPath(new URL("../dist/index.js", import.meta.url));
-const SUFFIXES = ["audit", "classify", "compare", "decide", "extract", "find", "gate", "noul", "rerank", "review", "screen", "verify"];
+const SUFFIXES = ["audit", "classify", "compare", "decide", "extract", "find", "gate", "locate_image", "noul", "rerank", "review", "screen", "verify"];
 const names = (prefix) => SUFFIXES.map((suffix) => `${prefix}_${suffix}`);
 const NOUL_ARGS = { propositions: ["Paris is the capital of France"] };
 
