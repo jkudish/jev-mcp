@@ -751,6 +751,8 @@ Built-in provider selection runs through the shared [@jkudish/jev-agent-tools](h
 - **Cloudflare Workers AI** (`CLOUDFLARE_API_TOKEN` or `JEV_CLOUDFLARE_API_TOKEN`, plus `CLOUDFLARE_ACCOUNT_ID`).
 - **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`).
 
+A fifth carrier, **OpenAI Decisions**, is never auto-detected; select it with `JEV_PROVIDER=openai`. See [OpenAI Decisions](#openai-decisions).
+
 `JEV_PROVIDER` forces one, or `compatible` for any System One-compatible endpoint. Unknown names and missing credentials are configuration errors, never silent fallbacks. For resilience reasons the OpenRouter, Cloudflare, and compatible transports are implemented locally; see [Transport resilience](#transport-resilience).
 
 The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/jev-agent-tools#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
@@ -762,7 +764,9 @@ The built-ins stay limited to major providers. The no-code extension path here i
 | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | none | Cloudflare Workers AI; used when no other provider key is present. `JEV_CLOUDFLARE_API_TOKEN` is honored first for separate credentials. |
 | `AI_GATEWAY_API_KEY` | none | Vercel AI Gateway; used when no other provider key is present. |
 | `JEV_VERCEL_ZERO_DATA_RETENTION` | unset | `1` or `true` asks the Vercel AI Gateway to route only through its zero-data-retention providers; use with `JEV_PROVIDER=vercel`. See [Vercel](#vercel). |
-| `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, or `compatible` instead of auto-detection. |
+| `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, `openai`, or `compatible` instead of auto-detection. `openai` is only ever selected this way. |
+| `JEV_OPENAI_API_KEY` or `OPENAI_API_KEY` | none | OpenAI Decisions key, `JEV_OPENAI_API_KEY` first; used only with `JEV_PROVIDER=openai`. |
+| `JEV_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Override the OpenAI API root (`/decisions` is appended). `OPENAI_BASE_URL` is deliberately ignored. |
 | `JEV_MCP_MODEL` | `jev-latest` | Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
 | `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
 | `JEV_API_BASE_URL` + `JEV_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `JEV_PROVIDER=compatible`. `JEV_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
@@ -773,7 +777,7 @@ The built-ins stay limited to major providers. The no-code extension path here i
 
 ### Transport resilience
 
-The fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpoint) retry only on the standard not-processed status set (408, 409, 429, and 500 through 599), with jittered exponential backoff, at most `JEV_MCP_MAX_ATTEMPTS` total attempts, all inside one `JEV_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry, non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error bodies on those transports are redacted, so a reflecting endpoint can never echo a configured key into MCP-visible errors. The only exception is the fixed OpenRouter token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Direct TypeSafe and Vercel calls use `@jkudish/jev-agent-tools`, whose direct fetch path avoids the SDK cancellation crash ([typesafe-sdk-js#2](https://github.com/typesafe-ai/typesafe-sdk-js/issues/2)); no retry or deadline uniformity is claimed for those two. Research and the original report: [issue #23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.
+The fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpoint) retry only on the standard not-processed status set (408, 409, 429, and 500 through 599), with jittered exponential backoff, at most `JEV_MCP_MAX_ATTEMPTS` total attempts, all inside one `JEV_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry, non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error bodies on those transports are redacted, so a reflecting endpoint can never echo a configured key into MCP-visible errors. The only exception is the fixed OpenRouter token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Direct TypeSafe, Vercel, and OpenAI calls use `@jkudish/jev-agent-tools`, whose direct fetch path avoids the SDK cancellation crash ([typesafe-sdk-js#2](https://github.com/typesafe-ai/typesafe-sdk-js/issues/2)); no retry or deadline uniformity is claimed for those three. Research and the original report: [issue #23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.
 
 ### Vercel
 
@@ -785,6 +789,16 @@ With `AI_GATEWAY_API_KEY` set, judgments run through the Vercel AI Gateway at `t
 - Unset, empty, `0`, or `false` (case-insensitive) leaves requests unchanged. Any other value is a configuration error before a request is sent.
 - Only the Vercel carrier reads the setting. Auto-selection prefers TypeSafe, OpenRouter, and Cloudflare when their keys are present, so set `JEV_PROVIDER=vercel` when every judgment must carry this restriction.
 - It is a Gateway routing restriction under Vercel and provider policies, not an end-to-end no-retention guarantee. It does not control this server, your MCP client, their logs, or other providers.
+
+### OpenAI Decisions
+
+`JEV_PROVIDER=openai` sends judgments to [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (public beta). `jev-latest` maps to `gpt-6-luna`; set `JEV_MCP_MODEL` to another OpenAI model name to pin one. Results report `provider: "openai"` and the model OpenAI answered with.
+
+- This is not Jev. `gpt-6-luna` has its own calibration, so `auto_accept`, `review_at`, and other thresholds tuned on Jev need re-checking against your own labeled cases before you rely on them.
+- It is never auto-detected, because `OPENAI_API_KEY` is set in many environments that never chose it.
+- The shared package translates the wire format: state becomes a labeled, pretty-printed JSON `input`, each noul becomes a true/false choice carrying its criteria, and the answers array is keyed back by question name. Requests above OpenAI's 200-question limit (for example a 250-candidate `jev_rerank`) are split into concurrent requests.
+- A question OpenAI declines comes back as a refusal. The affected judgment is `invalid_response`; its siblings are unaffected.
+- Data goes to OpenAI under your organization's data controls. Zero data retention applies only if your organization is eligible and has it enabled.
 
 ### Cloudflare
 

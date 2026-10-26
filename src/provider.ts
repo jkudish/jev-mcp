@@ -1,12 +1,12 @@
 // Jev transport: TypeSafe direct (default), OpenRouter Decisions, Cloudflare
-// Workers AI, or a caller-supplied Jev-compatible System One endpoint. All
-// speak the {state, questions} / answers contract; URL, auth, and model slugs
-// differ. Proxies add hops, so direct TypeSafe remains the recommended default.
+// Workers AI, Vercel AI Gateway, OpenAI Decisions (explicit only), or a
+// caller-supplied Jev-compatible System One endpoint. All but OpenAI speak the
+// {state, questions} / answers contract; the shared package translates OpenAI. Proxies add hops, so direct TypeSafe remains the recommended default.
 
 import { ask, openrouterJevModel, resolveTransport, type JevTransport, type JevTransportReply } from "@jkudish/jev-agent-tools";
 import { isRecord } from "./lib.js";
 
-export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "compatible";
+export type JevProvider = "typesafe" | "openrouter" | "cloudflare" | "vercel" | "openai" | "compatible";
 
 export interface AskResult {
   answers: Record<string, any>;
@@ -27,8 +27,8 @@ function redactSecret(text: string, secret: string): string {
 
 // ── Transport resilience ─────────────────────────────────────────────────────
 // Research and the original report: GitHub issue #23 by oppih. Applies to the
-// fetch-based transports (openrouter, cloudflare, compatible); the typesafe
-// and vercel branches go through SDK-owned transports whose retry and timeout
+// fetch-based transports (openrouter, cloudflare, compatible); the typesafe,
+// vercel, and openai branches go through SDK-owned transports whose retry and timeout
 // semantics are theirs, so no uniformity is claimed for those.
 
 const positiveIntFromEnv = (name: string, fallback: number): number => {
@@ -266,7 +266,7 @@ export async function askJev(
 ): Promise<AskResult> {
   const provider = resolve(process.env);
 
-  if (provider === "typesafe" || provider === "vercel") {
+  if (provider === "typesafe" || provider === "vercel" || provider === "openai") {
     // Keep the raw envelope for MCP's per-judgment invalid_response behavior:
     // the shared package rejects a whole batch if even one answer is invalid.
     const builtin = resolveTransport({ ...process.env, JEV_PROVIDER: process.env.JEV_PROVIDER || "auto" });
@@ -277,12 +277,13 @@ export async function askJev(
         try {
           return reply = await builtin.ask(input);
         } catch (error) {
-          // Both published drivers throw on an invalid usage *container* before
+          // The published drivers throw on an invalid usage *container* before
           // the Result validator sees it. Preserve the validation path, not a
           // misleading request_failed network error. Never reinterpret other
           // transport exceptions (including cancellation).
           if (error instanceof Error && (error.message === "TypeSafe API invalid usage (response omitted)" ||
-              error.message === "Vercel AI Gateway invalid usage (response omitted)")) {
+              error.message === "Vercel AI Gateway invalid usage (response omitted)" ||
+              error.message === "OpenAI Decisions API invalid usage (response omitted)")) {
             return reply = { answers: {}, usage: { input_tokens: 0, output_tokens: 0 }, model: input.model };
           }
           throw error;

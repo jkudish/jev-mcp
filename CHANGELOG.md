@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- OpenAI Decisions provider (spike): `JEV_PROVIDER=openai` with `JEV_OPENAI_API_KEY` or `OPENAI_API_KEY`, via the shared `@jkudish/jev-agent-tools` transport. Never auto-detected. Refusals invalidate only the refused judgment. Requires the unreleased jev-agent-tools OpenAI transport.
+
 ## 0.14.6
 
 - Updated MCP SDK to 2.4.0 and Node adapter to 2.1.2.
