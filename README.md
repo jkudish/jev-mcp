@@ -224,7 +224,7 @@ A malformed or missing relation answer fails closed per claim:
 - Subject-aware verification applies to `discern_verify`, not `discern_gate`. It adds one probability question per claim, not another API request. The replay figures in [#53](https://github.com/jkudish/discern-mcp/issues/53) are the contributor's private experiment, not an independently reproduced accuracy benchmark.
 - For quote-level citation checks, match quotes against the source in code first and send only the surviving claims. See the [citation-check cookbook](https://docs.typesafe.ai/cookbooks/citation_check).
 
-### Image evidence and discern_locate_image (1.0, unreleased)
+### Image evidence and discern_locate_image
 
 `discern_verify` accepts evidence items `{id?,text?,image?}`, with text or an image required. Strings and text-only evidence keep working. Mixed items share the existing source IDs; `supporting_evidence` can name an image item. Image calls default to `action:"review"`; only an explicitly supplied `auto_accept` permits the usual confidence policy. All image judgments carry an experimental-vision warning.
 
@@ -250,9 +250,9 @@ Supplying images sends them to your configured provider under its retention poli
 | Vercel `typesafe-ai/jev-1.13.0` / `typesafe-ai/jev-1.14.0` | 1 via decision protocol; existing ZDR option preserved | No, including 1.14 |
 | Cloudflare `typesafe/jev`, Vercel generic alias, compatible endpoint | Text only | No |
 
-See the [SDK capability matrix](https://github.com/jkudish/jev-agent-tools/blob/release/discern-1.0/README.md#image-judgments-and-box-10-unreleased) for exact IDs and placement restrictions. Provider support includes its protocol, not just a model version. Existing default provider/model choices do not change.
+See the [SDK capability matrix](https://github.com/jkudish/discern-sdk#image-judgments-and-box) for exact IDs and placement restrictions. Provider support includes its protocol, not just a model version. Existing default provider/model choices do not change.
 
-The October 15, 2026 (Pacific) synthetic evaluation passed 11/11 cases on each TypeSafe Jev version and OpenRouter Jev 1.14 after correcting its effective-snapshot check, and 7/7 on SubQ. OpenAI passed 7/9; Clef and Clef-flash each passed 4/7. Those strict probability misses remain recorded, not recalibrated away. Vercel image and text controls both returned account-restricted HTTP 403. See the [SDK live observations](https://github.com/jkudish/jev-agent-tools/blob/release/discern-1.0/README.md#evaluate-a-configured-image-route) for scenarios and limitations.
+The October 15, 2026 (Pacific) synthetic evaluation passed 11/11 cases on each TypeSafe Jev version and OpenRouter Jev 1.14 after correcting its effective-snapshot check, and 7/7 on SubQ. OpenAI passed 7/9; Clef and Clef-flash each passed 4/7. Those strict probability misses remain recorded, not recalibrated away. Vercel image and text controls both returned account-restricted HTTP 403. See the [SDK live observations](https://github.com/jkudish/discern-sdk#evaluate-a-configured-image-route) for scenarios and limitations.
 
 Five additional real stdio MCP calls passed through the packed SDK to live providers: TypeSafe localization returned `located`, `absent`, and `uncertain` for one/no/two red targets, with no box for the latter two; OpenRouter image verification returned `verified` with `action:"review"`; SubQ image decision selected the red candidate. Offline HTTP coverage uses both MCP protocol eras and verifies 401 auth, 413 body, and decoded-image-limit rejections without extra inference. Embedded coverage checks the hidden alias and unsupported-version rejection. This is synthetic integration evidence, not a production accuracy or visual-injection guarantee.
 
