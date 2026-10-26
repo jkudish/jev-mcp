@@ -1,28 +1,31 @@
-# Jev MCP
+# Discern MCP
 
-[![CI](https://github.com/jkudish/jev-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jkudish/jev-mcp/actions/workflows/ci.yml)
+[![CI](https://github.com/jkudish/discern-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jkudish/discern-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 <p align="center">
-  <img src=".github/jev-mcp-og.png" alt="jev-mcp — Fast, cheap, typed judgments from TypeSafe's Jev model, as MCP tools." />
+  <img src=".github/discern-mcp-banner.png" alt="discern-mcp: typed judgments as MCP tools. Runs on TypeSafe's Jev, Cloudflare's Clef, OpenAI Decisions, or SubQ Decisions." />
 </p>
 
-Fast, cheap, typed judgments from TypeSafe's Jev model, as MCP tools.
+Fast, cheap, typed judgments as MCP tools, answered by TypeSafe's Jev model by default, or by Cloudflare's Clef, OpenAI Decisions, or SubQ Decisions.
 
-Give your agent twelve judgment tools:
+> **Renamed.** This package was `@jkudish/jev-mcp` before 1.0. Existing setups keep working through 1.x; see [Migrating from jev-mcp](#migrating-from-jev-mcp).
 
-- `jev_verify` checks claims against evidence.
-- `jev_screen` judges content before it enters context.
-- `jev_noul` returns a calibrated probability for a stated proposition.
-- `jev_find` picks the best candidate by meaning.
-- `jev_rerank` scores and sorts every candidate.
-- `jev_classify` batch-assigns items to classes.
-- `jev_decide` settles bounded alternatives.
-- `jev_compare` judges how two passages relate.
-- `jev_extract` pulls field values with regex plus judgment.
-- `jev_audit` audits extracted values against their source before they are trusted.
-- `jev_review` scores a proposed diff before the task is called done.
-- `jev_gate` reviews a patch and verifies completion claims in one call.
+Give your agent thirteen judgment tools:
+
+- `discern_verify` checks claims against evidence.
+- `discern_locate_image` proposes a reviewed bounding box for one unambiguous image target.
+- `discern_screen` judges content before it enters context.
+- `discern_noul` returns a calibrated probability for a stated proposition.
+- `discern_find` picks the best candidate by meaning.
+- `discern_rerank` scores and sorts every candidate.
+- `discern_classify` batch-assigns items to classes.
+- `discern_decide` settles bounded alternatives.
+- `discern_compare` judges how two passages relate.
+- `discern_extract` pulls field values with regex plus judgment.
+- `discern_audit` audits extracted values against their source before they are trusted.
+- `discern_review` scores a proposed diff before the task is called done.
+- `discern_gate` reviews a patch and verifies completion claims in one call.
 
 Each judgment comes back typed: probabilities, and for most tools a confidence score, in roughly 150 to 500 ms, for a fraction of a cent. The cheap mechanical checks agents otherwise skip, because a frontier model is too slow to run on every page, claim, or candidate list.
 
@@ -43,32 +46,32 @@ This is early software. Expect rough edges. Issues and pull requests are welcome
 
 ## Install
 
-Requires Node.js 22 or newer and an API key for a Jev provider ([TypeSafe direct](https://console.typesafe.ai/settings/keys) is the default; alternatives are listed under [Configuration](#configuration)).
+Requires Node.js 22 or newer and an API key for a judgment provider ([TypeSafe direct](https://console.typesafe.ai/settings/keys) is the default; alternatives are listed under [Configuration](#configuration)).
 
 ### Let an agent install it for you
 
 Paste this into your coding agent:
 
 ```text
-Install the Jev MCP server for me. The package is @jkudish/jev-mcp on npm and the server
-command is `npx -y @jkudish/jev-mcp`; register it as an MCP server with your client. Check whether
+Install the Discern MCP server for me. The package is @jkudish/discern-mcp on npm and the server
+command is `npx -y @jkudish/discern-mcp`; register it as an MCP server with your client. Check whether
 TYPESAFE_API_KEY is already set in the server environment; if not, walk me through setting it up without
 pasting the key into the chat (I can create one at console.typesafe.ai/settings/keys). When it's
 registered, ask if I'd like to try a claim verification, and when we do, show me the verdicts and cost.
-Full instructions: https://github.com/jkudish/jev-mcp#readme
+Full instructions: https://github.com/jkudish/discern-mcp#readme
 ```
 
 From npm:
 
 ```bash
-npx -y @jkudish/jev-mcp
+npx -y @jkudish/discern-mcp
 ```
 
 <details>
 <summary>Amp</summary>
 
 ```bash
-amp mcp add jev -- npx -y @jkudish/jev-mcp
+amp mcp add discern -- npx -y @jkudish/discern-mcp
 ```
 
 </details>
@@ -77,7 +80,7 @@ amp mcp add jev -- npx -y @jkudish/jev-mcp
 <summary>Claude Code</summary>
 
 ```bash
-claude mcp add jev -- npx -y @jkudish/jev-mcp
+claude mcp add discern -- npx -y @jkudish/discern-mcp
 ```
 
 </details>
@@ -86,9 +89,9 @@ claude mcp add jev -- npx -y @jkudish/jev-mcp
 <summary>Codex (<code>~/.codex/config.toml</code>)</summary>
 
 ```toml
-[mcp_servers.jev]
+[mcp_servers.discern]
 command = "npx"
-args = ["-y", "@jkudish/jev-mcp"]
+args = ["-y", "@jkudish/discern-mcp"]
 ```
 
 </details>
@@ -99,9 +102,9 @@ args = ["-y", "@jkudish/jev-mcp"]
 ```json
 {
   "mcp": {
-    "jev": {
+    "discern": {
       "type": "local",
-      "command": ["npx", "-y", "@jkudish/jev-mcp"],
+      "command": ["npx", "-y", "@jkudish/discern-mcp"],
       "environment": { "TYPESAFE_API_KEY": "ts_..." }
     }
   }
@@ -116,9 +119,9 @@ args = ["-y", "@jkudish/jev-mcp"]
 ```json
 {
   "mcpServers": {
-    "jev": {
+    "discern": {
       "command": "npx",
-      "args": ["-y", "@jkudish/jev-mcp"],
+      "args": ["-y", "@jkudish/discern-mcp"],
       "env": { "TYPESAFE_API_KEY": "ts_..." }
     }
   }
@@ -134,42 +137,44 @@ Some MCP clients filter the environment before spawning servers, which silently 
 Stdio is the default. To host one shared server for a team or a remote agent, run it in stateless HTTP mode:
 
 ```bash
-JEV_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" TYPESAFE_API_KEY=ts_... npx -y @jkudish/jev-mcp --http
+DISCERN_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" TYPESAFE_API_KEY=ts_... npx -y @jkudish/discern-mcp --http
 ```
 
-It listens on `PORT` (default `8080`) and serves MCP at `/mcp`, with a health check at `/health`. `HOST` defaults to `127.0.0.1`; set `HOST=0.0.0.0` explicitly to serve beyond your machine. `--http` and `JEV_MCP_TRANSPORT=http` are equivalent, so containers and service units can select the transport without argv. It speaks MCP 2026-07-28 and falls back to stateless serving for 2025-era clients, so it keeps no sessions and scales behind any load balancer. Every call spends your Jev key, so `JEV_MCP_AUTH_TOKEN` is required unless `HOST` is loopback. Clients send it as a bearer token:
+It listens on `PORT` (default `8080`) and serves MCP at `/mcp`, with a health check at `/health`. `HOST` defaults to `127.0.0.1`; set `HOST=0.0.0.0` explicitly to serve beyond your machine. `--http` and `DISCERN_MCP_TRANSPORT=http` are equivalent, so containers and service units can select the transport without argv. It speaks MCP 2026-07-28 and falls back to stateless serving for 2025-era clients, so it keeps no sessions and scales behind any load balancer. Every call spends your provider key, so `DISCERN_MCP_AUTH_TOKEN` is required unless `HOST` is loopback. Clients send it as a bearer token:
 
 ```bash
-claude mcp add --transport http jev https://jev.example.com/mcp --header "Authorization: Bearer $JEV_MCP_AUTH_TOKEN"
+claude mcp add --transport http discern https://discern.example.com/mcp --header "Authorization: Bearer $DISCERN_MCP_AUTH_TOKEN"
 ```
 
-Some clients can only be configured with a URL and cannot send headers, such as claude.ai custom connectors. For those, set `JEV_MCP_PATH_TOKEN=1` and give the client `https://jev.example.com/mcp/<token>`; the segment is compared raw, in constant time, against `JEV_MCP_AUTH_TOKEN`, and the server refuses to start unless the token is URL-safe (letters, digits, `.` `_` `-` `~`). Use a dedicated high-entropy token for this form (for example `openssl rand -hex 32`), serve it over HTTPS only, and treat the whole URL as the secret: redact full paths from proxy and access logs, keep the URL out of shared configs, and avoid redirects of it. Rotate the token if it escapes. It is off by default because a URL is easier to leak than a header. The header form keeps working alongside it.
+Some clients can only be configured with a URL and cannot send headers, such as claude.ai custom connectors. For those, set `DISCERN_MCP_PATH_TOKEN=1` and give the client `https://discern.example.com/mcp/<token>`; the segment is compared raw, in constant time, against `DISCERN_MCP_AUTH_TOKEN`, and the server refuses to start unless the token is URL-safe (letters, digits, `.` `_` `-` `~`). Use a dedicated high-entropy token for this form (for example `openssl rand -hex 32`), serve it over HTTPS only, and treat the whole URL as the secret: redact full paths from proxy and access logs, keep the URL out of shared configs, and avoid redirects of it. Rotate the token if it escapes. It is off by default because a URL is easier to leak than a header. The header form keeps working alongside it.
 
-The server itself speaks plain HTTP: terminate TLS at a reverse proxy or load balancer before exposing it beyond loopback, and put connection limits and request rate limits at that ingress. The process bounds admitted `/mcp` requests (`JEV_MCP_MAX_CONCURRENCY`, default 16; excess shed with `429`) and caps request bodies at 4 MiB, but it does not limit sockets waiting to finish headers or repeatedly rejected requests. The tool list is static: the server advertises no `listChanged` capability and refuses `subscriptions/listen` requests, so an idle listener cannot hold one of the concurrency slots. Clients that never open a listener, the common case, see no difference.
+The server itself speaks plain HTTP: terminate TLS at a reverse proxy or load balancer before exposing it beyond loopback, and put connection limits and request rate limits at that ingress. The process bounds admitted `/mcp` requests (`DISCERN_MCP_MAX_CONCURRENCY`, default 16; excess shed with `429`) and caps request bodies at 4 MiB, but it does not limit sockets waiting to finish headers or repeatedly rejected requests. The tool list is static: the server advertises no `listChanged` capability and refuses `subscriptions/listen` requests, so an idle listener cannot hold one of the concurrency slots. Clients that never open a listener, the common case, see no difference.
 
 ### Embedding
 
-The `jev-mcp` bin boots a transport when run; importing the package never does. To run the tools in-process (an agent hook, a larger server, a test harness):
+The `discern-mcp` bin boots a transport when run; importing the package never does. To run the tools in-process (an agent hook, a larger server, a test harness):
 
-- `import { createServer } from "@jkudish/jev-mcp"` — side-effect-free: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all twelve, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/jev-mcp/server` is an explicit alias for the same entry.
-- `MODEL` is exported alongside it, resolved from `JEV_MCP_MODEL` at import time (default `jev-latest`), so embedders report the same model the CLI serves.
-- The package now declares `exports`, so deep imports like `@jkudish/jev-mcp/dist/index.js` no longer resolve. Before the exports map, importing that path booted a transport inside the importer's process — the trap `/server` and the safe root entry replace. `dist/index.js` remains the bin and still boots when executed.
+- `import { createServer } from "@jkudish/discern-mcp"` starts no transport: it registers the tools and exports a `createServer()` that returns a fresh `McpServer` wired with all thirteen, without starting stdio or HTTP. Connect your own transport to it; the stateless HTTP path in this package uses the same factory. `@jkudish/discern-mcp/server` is an explicit alias for the same entry.
+- `MODEL` is exported alongside it, resolved from `DISCERN_MCP_MODEL` at import time (default `latest`, each provider's current default model), so embedders report the same model the CLI serves.
+- `createServer({ toolNames })` chooses which tool names `tools/list` shows (`"discern"` or `"jev"`); without it, `DISCERN_TOOL_NAMES` decides via the exported `resolveToolNames()`. The library never changes `process.env`: it reads a copy with the `JEV_*` aliases applied, and `createServer()` throws if a `JEV_` and `DISCERN_` pair conflicts. Only the `discern-mcp` bin writes the aliases into `process.env`.
+- `@jkudish/discern-mcp/bin` is the bin entry; importing it starts a transport, exactly like running `discern-mcp`.
+- The package now declares `exports`, so deep imports like `@jkudish/discern-mcp/dist/index.js` no longer resolve. Before the exports map, importing that path booted a transport inside the importer's process, the trap `/server` and the safe root entry replace. `dist/index.js` remains the bin and still boots when executed.
 
 ### Agent skill
 
-The package ships an agent skill (`skills/jev/`) that teaches coding agents when to reach for each tool instead of answering from their own reading: the difference between tools that sit registered-but-unused and tools that get called. Copy it into your client's skills directory:
+The package ships an agent skill (`skills/discern/`) that teaches coding agents when to reach for each tool instead of answering from their own reading: the difference between tools that sit registered-but-unused and tools that get called. Copy it into your client's skills directory:
 
 ```bash
-npm pack @jkudish/jev-mcp@latest
-tar -xzf jkudish-jev-mcp-*.tgz
-mkdir -p .claude/skills && cp -R package/skills/jev .claude/skills/
+npm pack @jkudish/discern-mcp@latest
+tar -xzf jkudish-discern-mcp-*.tgz
+mkdir -p .claude/skills && cp -R package/skills/discern .claude/skills/
 ```
 
 Claude Code reads `.claude/skills`, OpenCode `.opencode/skills`, and Codex and generic agents `.agents/skills`. In Amp, the skill's frontmatter bundles the MCP server, so dropping it into a skills directory wires up both.
 
 ## The tools
 
-### jev_verify
+### discern_verify
 
 Check each claim in a report, PR description, or agent brief against the sources it cites. One call returns a verdict per claim, the full probability distribution, a confidence score, and whether the verdict stands on its own or needs review.
 
@@ -216,10 +221,62 @@ A malformed or missing relation answer fails closed per claim:
 - Each claim also gets a subject question: does the evidence report on that claim's own check, run, file, or object? `same_subject` carries the probability. This follows TypeSafe's [decomposition pattern](https://docs.typesafe.ai/primitives): separate judgments, composed in code.
 - A contradiction stands only when `same_subject` reaches `subject_at` (default `0.5`). Below it, the verdict is `unsupported`, the original relation remains visible as `relation_verdict: "contradicted"`, and the claim requires `review`.
 - A missing or malformed subject answer yields `same_subject: null`. A contradiction keeps its relation verdict but requires `review`, regardless of `auto_accept`; verified and unsupported relations retain their confidence-based routing.
-- Subject-aware verification applies to `jev_verify`, not `jev_gate`. It adds one probability question per claim, not another API request. The replay figures in [#53](https://github.com/jkudish/jev-mcp/issues/53) are the contributor's private experiment, not an independently reproduced accuracy benchmark.
+- Subject-aware verification applies to `discern_verify`, not `discern_gate`. It adds one probability question per claim, not another API request. The replay figures in [#53](https://github.com/jkudish/discern-mcp/issues/53) are the contributor's private experiment, not an independently reproduced accuracy benchmark.
 - For quote-level citation checks, match quotes against the source in code first and send only the surviving claims. See the [citation-check cookbook](https://docs.typesafe.ai/cookbooks/citation_check).
 
-### jev_screen
+### Image evidence and discern_locate_image
+
+`discern_verify` accepts evidence items `{id?,text?,image?}`, with text or an image required. Strings and text-only evidence keep working. Mixed items share the existing source IDs; `supporting_evidence` can name an image item. Image calls default to `action:"review"`; only an explicitly supplied `auto_accept` permits the usual confidence policy. All image judgments carry an experimental-vision warning.
+
+`discern_decide` accepts optional `images:[{id,image}]`, with unique IDs that evidence or candidate descriptions can name. These are shared evidence; candidate IDs, requirements, escape hatches, and contradiction handling stay unchanged. Other existing tools, including Gate and Noul, remain text-only.
+
+Use one strict image envelope everywhere:
+
+```jsonc
+{ "mime_type": "image/png", "data_base64": "<canonical standard base64 of the image bytes>" }
+```
+
+PNG/JPEG only. No URLs, paths, data-URL prefixes, uploaded file IDs, resizing, or EXIF correction. Limits: 1 MiB/image, 2 MiB aggregate decoded, 4 images, 4 MiB serialized image-bearing arguments. Base64 strings are checked before decoding; signatures must match MIME. HTTP retains its 4 MiB ingress ceiling; stdio checks tool arguments after the MCP library has parsed the frame. Full decoding and pixel-dimension checks remain the provider's responsibility. For TypeSafe, prepare images at 280–1568 pixels per side. No pixels appear in tool results or provider error messages.
+
+Supplying images sends them to your configured provider under its retention policy, without a server enable flag. **SubQ retains images indefinitely by default.** No automatic model/provider fallback occurs. Unsupported features are tool errors before inference, not semantic absence. Upstream vision/Box contracts are experimental; local protocol tests do not establish visual accuracy. The SDK's synthetic live results are linked below; Vercel remains account-blocked and live-unverified.
+
+| Configured route | Image evidence | Localization |
+| --- | --- | --- |
+| TypeSafe Jev 1.13/1.14 and known image aliases | Up to 4 | Explicit `jev-1.14.0` |
+| OpenRouter Jev 1.13/1.14 and known image aliases | Up to 4 | Explicit `typesafe/jev-1.14` |
+| OpenAI Decisions `gpt-6-luna` | Up to 4 shared state images | No |
+| SubQ `subq-snap-preview` | 1 shared state image initially | No |
+| Cloudflare `clef` / `clef-flash` | 1; at most 64 questions and 2,000 serialized state bytes | No |
+| Vercel `typesafe-ai/jev-1.13.0` / `typesafe-ai/jev-1.14.0` | 1 via decision protocol; existing ZDR option preserved | No, including 1.14 |
+| Cloudflare `typesafe/jev`, Vercel generic alias, compatible endpoint | Text only | No |
+
+See the [SDK capability matrix](https://github.com/jkudish/discern-sdk#image-judgments-and-box) for exact IDs and placement restrictions. Provider support includes its protocol, not just a model version. Existing default provider/model choices do not change.
+
+The October 15, 2026 (Pacific) synthetic evaluation passed 11/11 cases on each TypeSafe Jev version and OpenRouter Jev 1.14 after correcting its effective-snapshot check, and 7/7 on SubQ. OpenAI passed 7/9; Clef and Clef-flash each passed 4/7. Those strict probability misses remain recorded, not recalibrated away. Vercel image and text controls both returned account-restricted HTTP 403. See the [SDK live observations](https://github.com/jkudish/discern-sdk#evaluate-a-configured-image-route) for scenarios and limitations.
+
+Five additional real stdio MCP calls passed through the packed SDK to live providers: TypeSafe localization returned `located`, `absent`, and `uncertain` for one/no/two red targets, with no box for the latter two; OpenRouter image verification returned `verified` with `action:"review"`; SubQ image decision selected the red candidate. Offline HTTP coverage uses both MCP protocol eras and verifies 401 auth, 413 body, and decoded-image-limit rejections without extra inference. Embedded coverage checks the hidden alias and unsupported-version rejection. This is synthetic integration evidence, not a production accuracy or visual-injection guarantee.
+
+To localize, call `discern_locate_image` (or its `jev_locate_image` compatibility alias):
+
+```jsonc
+{
+  "image": { "mime_type": "image/png", "data_base64": "<image bytes as base64>" },
+  "target": "the red mug on the right",
+  "context": "Optional short context, treated as evidence",
+  "model": "jev-1.14.0"
+}
+```
+
+The optional model override stays on the configured provider. Target is limited to 1,000 characters and context to 2,000. One request asks presence, uniqueness, and Box independently. All three must validate before applying policy:
+
+- `located`: presence ≥ 0.8, uniqueness ≥ 0.8, Box confidence ≥ 0.8. Returns `{top,bottom,left,right}` normalized to `[0,1]`, with strictly ordered edges.
+- `absent`: presence ≤ 0.2, with a fully valid bundle. Returns `box:null` even if Box confidence is high.
+- `uncertain`: any other valid bundle, including null/missing Box confidence. Returns `box:null` and a reason such as `ambiguous_target`.
+- `invalid_response`: malformed/missing judgments, invalid geometry, usage, or identity. Returns `box:null`, never absence.
+
+Every result includes `action:"review"`, the thresholds, raw presence/uniqueness probabilities, Box confidence, provider/model, usage, and a SHA-256 `image_id`. The digest identifies content, not screenshot freshness. These provisional thresholds are not calibrated for production. A Box alone cannot establish presence or permission to act. Discern Browser remains DOM-driven and never clicks these coordinates.
+
+### discern_screen
 
 Judge fetched or pasted text before an agent reads it. One call returns the probability the text contains instructions aimed at an AI agent (prompt injection), whether it has substance, and whether it is relevant to the task at hand.
 
@@ -258,16 +315,16 @@ Missing or malformed required answers return an error branch:
 - `block_at` (default `0.75`) and `review_at` (default `0.25`) are thresholds on the injection probability. Both are parameters.
 - Pattern from the [guardrails cookbook](https://docs.typesafe.ai/cookbooks/llm_guardrails).
 
-### jev_noul
+### discern_noul
 
 Calibrated probability for propositions you state, in one batched call. Use it when you need a bare "how likely is this" rather than a relation to evidence.
 
 - `propositions`: up to 64 per call, 2000 chars each; a combined 150,000-character proposition-plus-context budget guards request size.
-- `context` is optional. Supplied context informs the judgment but is not a proof guarantee; without it, the model's own knowledge applies. To test claims strictly against evidence, including whether the evidence is merely silent, use [jev_verify](#jev_verify).
+- `context` is optional. Supplied context informs the judgment but is not a proof guarantee; without it, the model's own knowledge applies. To test claims strictly against evidence, including whether the evidence is merely silent, use [discern_verify](#discern_verify).
 - Each result carries `probability` plus a `label`: `likely` (at or above `auto_accept`), `unlikely` (at or below `1 - auto_accept`), or `uncertain` between them. `auto` means the label stands without review, in either direction.
 - `auto_accept` must exceed 0.5; default `0.85`. A missing or malformed answer fails closed with `invalid_response` and no label.
 
-### jev_find
+### discern_find
 
 Rank candidates against a plain-language query. No embeddings, no index to maintain: one call scores every candidate id and also reports whether any candidate addresses the query at all.
 
@@ -313,7 +370,7 @@ Missing or malformed `exists` or `best` answers return an error branch:
 - Up to 250 candidates per call. Candidate texts are truncated at 2,000 characters.
 - Pattern from the [semantic-find cookbook](https://docs.typesafe.ai/cookbooks/semantic_find).
 
-### jev_classify
+### discern_classify
 
 Assign each item to one class from a shared catalog, in one batched request: the catalog is sent once and every item becomes an independent Choice question. Designed for labeling many documents, messages, or records against a stable label set.
 
@@ -349,9 +406,9 @@ Assign each item to one class from a shared catalog, in one batched request: the
 - A malformed or incomplete model response is reported as `status: invalid_response` on that item, never as model uncertainty. The chosen class must have the maximum probability (ties and differences within `1e-9` are accepted); otherwise that item returns `invalid_response`.
 - For a runnable Exa search → classification pipeline with preserved source URLs and review routing, see the [Exa classification example](examples/exa-classify.md).
 
-### jev_decide
+### discern_decide
 
-One bounded decision, 2-6 candidates, evidence, and explicit priorities. Jev returns a Choice distribution over the candidates plus escape hatches, and a per-candidate per-requirement check, in one request.
+One bounded decision, 2-6 candidates, evidence, and explicit priorities. The model returns a Choice distribution over the candidates plus escape hatches, and a per-candidate per-requirement check, in one request.
 
 ```jsonc
 // arguments
@@ -380,14 +437,14 @@ One bounded decision, 2-6 candidates, evidence, and explicit priorities. Jev ret
 
 - Escape hatches (`ask_user`, `investigate`, `none`) let the model decline to rank when a preference or fact is missing; `escaped: true` in the result marks it. Disable with `escape_hatches: false` for closed-world choices.
 - Requirement checks run as independent questions in the same request and may disagree with the recommendation; `recommendation.contradicted_requirements` names the zero-based requirement indexes whose checks came back `contradicted` for the selected candidate, and a contradiction also surfaces as a warning.
-- Pass `escalate_on_contradiction: true` to withdraw a contradicted recommendation in addition to the warning: the result comes back `selected: null` with `status: "escalate"` (the `jev_verify` vocabulary), probabilities and `contradicted_requirements` intact. The indexes describe the recommended candidate before withdrawal — `selected` is null afterward. The default keeps the recommendation and warns. No re-selection: a withdrawn recommendation is never silently replaced by the runner-up.
+- Pass `escalate_on_contradiction: true` to withdraw a contradicted recommendation in addition to the warning: the result comes back `selected: null` with `status: "escalate"` (the `discern_verify` vocabulary), probabilities and `contradicted_requirements` intact. The indexes describe the recommended candidate before withdrawal; `selected` is null afterward. The default keeps the recommendation and warns. No re-selection: a withdrawn recommendation is never silently replaced by the runner-up.
 - One call per unchanged decision. Repeat only with materially new evidence or criteria.
 
 <sub>Pattern credit: [thesammykins/jev_ampcode](https://github.com/thesammykins/jev_ampcode).</sub>
 
-### jev_rerank
+### discern_rerank
 
-Score every candidate's relevance to a query and get them back sorted. You bring the candidates (file contents, database rows, search hits); Jev scores and sorts what you hand it. Unlike `jev_find`, which picks one best answer, rerank gives each candidate its own relevance probability, so the whole ordering survives. TypeSafe's rerank cookbook reports that on the CLERC benchmark this pattern lifted top-1 from 5% to 18% and top-10 from 38% to 62%.
+Score every candidate's relevance to a query and get them back sorted. You bring the candidates (file contents, database rows, search hits); the model scores and sorts what you hand it. Unlike `discern_find`, which picks one best answer, rerank gives each candidate its own relevance probability, so the whole ordering survives. TypeSafe's rerank cookbook reports that on the CLERC benchmark this pattern lifted top-1 from 5% to 18% and top-10 from 38% to 62%.
 
 ```jsonc
 // arguments
@@ -427,9 +484,9 @@ Score every candidate's relevance to a query and get them back sorted. You bring
 - Candidate ids are preserved verbatim. If any answer comes back malformed, the whole ranking is reported `invalid_response` rather than sorting a missing score as a confident zero.
 - Up to 250 candidates and a 100,000-character aggregate budget; split larger batches.
 - Ranking whole documents? Chunk them into ~2,000-character candidates with distinct ids (`report.md#c1`, `report.md#c2`) and merge per document by its best chunk's score.
-- Use `jev_find` when you want one best answer plus an existence check; use `jev_rerank` when the ordering itself is the deliverable. See the [rerank cookbook](https://docs.typesafe.ai/cookbooks/rerank_typesafe).
+- Use `discern_find` when you want one best answer plus an existence check; use `discern_rerank` when the ordering itself is the deliverable. See the [rerank cookbook](https://docs.typesafe.ai/cookbooks/rerank_typesafe).
 
-### jev_compare
+### discern_compare
 
 Judge how two passages relate: `same_fact`, `contradicts`, or `different_facts`, with the full probability distribution, confidence, and an auto-versus-review decision. Supply optional aspects (price, launch date, method) and each gets its own independent judgment in the same request.
 
@@ -459,9 +516,9 @@ Judge how two passages relate: `same_fact`, `contradicts`, or `different_facts`,
 - The request supplies no evidence beyond the two passages, so a `same_fact` verdict means they agree with each other, not that they are true.
 - Use for source reconciliation, changelog-versus-code drift, or checking that a summary matches its source.
 
-### jev_extract
+### discern_extract
 
-Pull structured fields out of a document with your regex and Jev's judgment. Your regex finds candidate substrings in code, Jev picks which candidate is the field's real value, and the value comes back verbatim, exactly as it appears in the document, never model-generated.
+Pull structured fields out of a document with your regex and the model's judgment. Your regex finds candidate substrings in code, the model picks which candidate is the field's real value, and the value comes back verbatim, exactly as it appears in the document, never model-generated.
 
 ```jsonc
 // arguments
@@ -486,15 +543,15 @@ Pull structured fields out of a document with your regex and Jev's judgment. You
 }
 ```
 
-- A field whose regex matches nothing comes back `not_found` with reason `no_regex_matches` and never reaches the model: no hallucinated value. In a call where every field is a zero-match, no API call is made at all. Jev can also pick `none_of_them` when every regex match is wrong for the field; that `not_found` is model-judged and gated on top probability and winner margin like any pick.
+- A field whose regex matches nothing comes back `not_found` with reason `no_regex_matches` and never reaches the model: no hallucinated value. In a call where every field is a zero-match, no API call is made at all. The model can also pick `none_of_them` when every regex match is wrong for the field; that `not_found` is model-judged and gated on top probability and winner margin like any pick.
 - Values are verbatim document substrings, exactly as the regex matched them. The model picks among matches; it never writes a value.
 - Ambiguous picks come back flagged `review` with the value still attached; treat a `review` value as provisional, not extracted. If the regex found more matches than the cap allows, or skipped matches longer than 2,000 characters, the field can never be `auto` and a `none_of_them` pick can never be a definite `not_found`: it returns `review` with reason `candidate_limit` and `candidates_truncated` or `matches_skipped_too_long` set, because the best value may be among the unsent matches. When every match is over 2,000 characters and none is eligible at all, the reason is `matches_too_long` instead. A malformed model answer is still `invalid_response`, not a semantic outcome.
 - Invalid patterns and regexes that time out (they run in a sandboxed worker with a 1-second deadline, so a pathological pattern cannot hang the server) return `invalid_pattern` with the error instead of failing the whole call.
 - Up to 32 fields per call and 20 candidate matches per field, judged in one request. The document is capped at 50,000 characters, and the candidate match text at 50,000 characters in aggregate.
 
-### jev_audit
+### discern_audit
 
-Audit extracted values against the text they claim to come from, before the values are trusted. For each value, one request carries a failure-mode battery — hallucinated, off-target, incomplete, wrong format — each a yes/no question framed so that yes means something is wrong, plus a dedicated omission check for values that came back empty. A value's `p_wrong` is the maximum over its checks; any value at or above `wrong_at` (default 0.7) escalates the whole audit. Max-gated, never averaged: one fired flag cannot be diluted by clean siblings.
+Audit extracted values against the text they claim to come from, before the values are trusted. For each value, one request carries a failure-mode battery (hallucinated, off-target, incomplete, wrong format), each a yes/no question framed so that yes means something is wrong, plus a dedicated omission check for values that came back empty. A value's `p_wrong` is the maximum over its checks; any value at or above `wrong_at` (default 0.7) escalates the whole audit. Max-gated, never averaged: one fired flag cannot be diluted by clean siblings.
 
 ```jsonc
 // arguments
@@ -524,7 +581,7 @@ Audit extracted values against the text they claim to come from, before the valu
 }
 ```
 
-- Here the currency was fabricated — the invoice never states one — and the `hallucinated` check catches what a schema-valid extraction would happily pass through.
+- Here the currency was fabricated (the invoice never states one), and the `hallucinated` check catches what a schema-valid extraction would happily pass through.
 - The framing discipline is the point: every check asks "is something wrong", so one threshold routes the record. The battery, the omission special case, and the max gate come from TypeSafe's SDE cascade cookbook, where this verifier is what catches a schema-valid fabrication.
 - An empty value gets only the omission check: wrong when the source supports a value the extractor missed, correct when returning nothing was right.
 - Malformed answers mark the record `invalid_response` and escalate: a protocol failure is never a clean pass. A truncated `source` (over 50,000 characters) demotes `pass` to `review`, never keeps it.
@@ -532,18 +589,18 @@ Audit extracted values against the text they claim to come from, before the valu
 
 #### Multimodal intake
 
-Jev reads text only — its state is a string, JSON object, or array, and images, audio, and video are not supported (pre-process to text first, per the TypeSafe docs). Multimodal judgment therefore lands as a cascade, with the text artifacts cross-checked by the text-only judge:
+`discern_verify` and `discern_decide` can judge supplied images on supported routes; `discern_locate_image` proposes geometry. These do not provide free-form transcription. For extracted values, audio/video, or text-only routes, use a cascade that cross-checks the extracted text:
 
 1. **Extract** with your host model: a vision or ASR model produces a dense transcript of the image, scan, or recording, plus the structured values you want.
-2. **Screen** the transcript with `jev_screen`: transcripts of fetched content are untrusted text and get the injection screen before anything else. The screen is advice you enforce — honor `block` and `review` before passing the transcript onward. It protects what enters your context, not the vision or ASR model, which has already consumed the untrusted material.
-3. **Audit** the values against the transcript with `jev_audit`. This is a cross-check between two text artifacts, not verification of the original: when the original text exists (a document, a page), audit against it directly. For vision or ASR output, one host model usually produces both the transcript and the values, so the same misreading can appear in both and pass the audit — producing the two separately, or with independent models, makes the cross-check stronger. `pass` means no check crossed the threshold, never that the values were verified against the pixels or audio.
-4. **Judge** with the existing tools — verify claims, classify, review — over the audited text, keeping the provenance in state so downstream judgments know they read an extraction, not the original.
+2. **Screen** the transcript with `discern_screen`: transcripts of fetched content are untrusted text and get the injection screen before anything else. The screen is advice you enforce: honor `block` and `review` before passing the transcript onward. It protects what enters your context, not the vision or ASR model, which has already consumed the untrusted material.
+3. **Audit** the values against the transcript with `discern_audit`. This is a cross-check between two text artifacts, not verification of the original: when the original text exists (a document, a page), audit against it directly. For vision or ASR output, one host model usually produces both the transcript and the values, so the same misreading can appear in both and pass the audit. Producing the two separately, or with independent models, makes the cross-check stronger. `pass` means no check crossed the threshold, never that the values were verified against the pixels or audio.
+4. **Judge** with the existing tools (verify claims, classify, review) over the audited text, keeping the provenance in state so downstream judgments know they read an extraction, not the original.
 
-<sub>Question design adapted from the TypeSafe [SDE cascade cookbook](https://docs.typesafe.ai/cookbooks/sde_cascade) (see [#45](https://github.com/jkudish/jev-mcp/issues/45)).</sub>
+<sub>Question design adapted from the TypeSafe [SDE cascade cookbook](https://docs.typesafe.ai/cookbooks/sde_cascade) (see [#45](https://github.com/jkudish/discern-mcp/issues/45)).</sub>
 
-### jev_review
+### discern_review
 
-Score a proposed diff against the request before the task is called done. Jev answers four rubric questions, correctness, spec match, test gap, and blast radius, each 0..2, plus one safe-to-apply probability; the server combines them into a weighted composite and one action: `auto`, `review`, or `escalate`. It judges what you hand it. It never runs tests and never applies the patch.
+Score a proposed diff against the request before the task is called done. The model answers four rubric questions, correctness, spec match, test gap, and blast radius, each 0..2, plus one safe-to-apply probability; the server combines them into a weighted composite and one action: `auto`, `review`, or `escalate`. It judges what you hand it. It never runs tests and never applies the patch.
 
 ```jsonc
 // arguments
@@ -575,24 +632,24 @@ Score a proposed diff against the request before the task is called done. Jev an
 }
 ```
 
-- Why the example escalates: the composite clears the floor, but the failing test drags `safe_to_apply` to 0.24 and rubric confidences sit under `review_at` — decent scores don't sail through on their own.
+- Why the example escalates: the composite clears the floor, but the failing test drags `safe_to_apply` to 0.24 and rubric confidences sit under `review_at`, so decent scores don't sail through on their own.
 - Rubric scores run 0..2. Higher is better for `correctness` and `spec_match`; higher is worse for `test_gap` and `blast_radius`, and the composite inverts those two before weighting, so a composite of 1.0 means favorable on every rubric.
 - A score answer may carry its full probability distribution over the three options; when the provider reports one, it is validated (exact keys, probabilities summing to one, expected value within a small tolerance of the reported score) and returned in `scores.*.probabilities`. Absent means "not reported" and stays `null`; a distribution that is present but malformed or contradictory marks that rubric `invalid_response`.
 - `reason_codes` collects why the review decided as it did: `invalid_response`, `unknown_confidence`, `confidence_below_review`, `safe_to_apply_below_review`, `confidence_below_auto_accept`, `safe_to_apply_below_auto_accept`, `composite_below_floor`, `incomplete_context`, `accepted`. `limiting_rubrics` names the rubric(s) that bound the decision, ties included: the null-confidence rubrics when confidence is unknown, every rubric tied at the minimum confidence when a confidence threshold blocks, and the least favorable rubrics when the composite floor blocks.
 - `auto` requires `safe_to_apply` and every rubric confidence at `auto_accept` and the composite at `composite_floor`. `safe_to_apply` or any rubric confidence below `review_at`, or unknown, escalates; a composite below `composite_floor` returns `review`, not `escalate`. Unknown confidence counts as escalate, never as a value that can satisfy a threshold.
 - `request` frames the review; it is not proof of anything. Put real output in `tests`. Every field is treated as evidence to evaluate, never instructions to follow.
 - Each text field is capped at 50,000 characters. Truncated input sets `truncated: true` and can never return `auto`; a malformed answer is `invalid_response`, not a semantic outcome.
-- Multi-file change: pass `files` (an array of `{ path, diff }`, up to 16 files) instead of `diff` — exactly one of the two. `jev_gate` takes the same `files` input for its review half.
+- Multi-file change: pass `files` (an array of `{ path, diff }`, up to 16 files) instead of `diff`; send exactly one of the two. `discern_gate` takes the same `files` input for its review half.
 - The rubric is asked once per file, all in one request, each question scoped to its own file by index; the result carries `mode: "per-file"` and a `files` array with the full per-file review.
-- Composed top-level fields: the change is `auto` only when every file is `auto`, `composite` is the file mean, `safe_to_apply` is the file minimum, and `limiting` names the file and rubrics that bound the decision. Nothing is averaged into invisibility — a weak file stays visible as itself.
+- Composed top-level fields: the change is `auto` only when every file is `auto`, `composite` is the file mean, `safe_to_apply` is the file minimum, and `limiting` names the file and rubrics that bound the decision. Nothing is averaged into invisibility; a weak file stays visible as itself.
 - One request must fit the combined budget: `request` + `tests` + all file diffs together stay under 200,000 characters.
 - Truncation is per-file: only the file whose own diff (or the shared request/tests context) was truncated is demoted to `review`; an intact file is never demoted for a truncated sibling.
 
-<sub>Adapted from [burnigtm/jev-mcp](https://github.com/burnigtm/jev-mcp) (MIT), via [PR #2](https://github.com/jkudish/jev-mcp/pull/2) by rimusz.</sub>
+<sub>Adapted from [burnigtm/jev-mcp](https://github.com/burnigtm/jev-mcp) (MIT), via [PR #2](https://github.com/jkudish/discern-mcp/pull/2) by rimusz.</sub>
 
-### jev_gate
+### discern_gate
 
-The completion gate: the same patch review as `jev_review`, plus your completion claims verified against evidence you supply, in one call. Auto only when the review is accepted and every claim is verified at or above `auto_accept`; a confidently contradicted claim escalates. The request and the claims are assertions to check, never proof.
+The completion gate: the same patch review as `discern_review`, plus your completion claims verified against evidence you supply, in one call. Auto only when the review is accepted and every claim is verified at or above `auto_accept`; a confidently contradicted claim escalates. The request and the claims are assertions to check, never proof.
 
 ```jsonc
 // arguments
@@ -634,35 +691,35 @@ The completion gate: the same patch review as `jev_review`, plus your completion
 }
 ```
 
-- In the example, the two true claims verify at full confidence, and the one that matters — "the full test suite passes" — is contradicted by the test log at full confidence: exactly the claim a coding agent is most tempted to hand-wave.
-- Claim questions instruct Jev to use `evidence` only, not world knowledge, and not the request, diff, or tests fields; if a claim needs a diff excerpt or a test log as support, supply it in `evidence`. All fields share one model state, so this is instruction-level isolation, not a hard boundary. Every field is evidence to evaluate, never instructions to follow.
-- `reason_codes` collects why the gate decided as it did: `incomplete_context`, `invalid_response`, `review_escalated`, `review_required`, plus the review half's specific codes (`unknown_confidence`, `confidence_below_review`, `safe_to_apply_below_review`, `confidence_below_auto_accept`, `safe_to_apply_below_auto_accept`, `composite_below_floor`), `claims_contradicted`, `claims_unsupported`, `claim_confidence_low`, `claim_confidence_below_auto_accept`, `accepted`. The embedded `review` object carries the same `reason_codes` and `limiting_rubrics` a standalone `jev_review` returns.
+- In the example, the two true claims verify at full confidence, and the one that matters, "the full test suite passes", is contradicted by the test log at full confidence: exactly the claim a coding agent is most tempted to hand-wave.
+- Claim questions instruct the model to use `evidence` only, not world knowledge, and not the request, diff, or tests fields; if a claim needs a diff excerpt or a test log as support, supply it in `evidence`. All fields share one model state, so this is instruction-level isolation, not a hard boundary. Every field is evidence to evaluate, never instructions to follow.
+- `reason_codes` collects why the gate decided as it did: `incomplete_context`, `invalid_response`, `review_escalated`, `review_required`, plus the review half's specific codes (`unknown_confidence`, `confidence_below_review`, `safe_to_apply_below_review`, `confidence_below_auto_accept`, `safe_to_apply_below_auto_accept`, `composite_below_floor`), `claims_contradicted`, `claims_unsupported`, `claim_confidence_low`, `claim_confidence_below_auto_accept`, `accepted`. The embedded `review` object carries the same `reason_codes` and `limiting_rubrics` a standalone `discern_review` returns.
 - Up to 16 claims and 16 evidence items per call. Text fields are capped at 50,000 characters each, claims at 2,000, and evidence at 200,000 characters in aggregate; oversized evidence is rejected before any model call. Malformed answers surface as `invalid_response` and the gate never returns `auto` on one.
-- The review half accepts `files` instead of `diff` for a multi-file change, exactly as `jev_review` does: the rubric is asked once per file in the same request, the review is `auto` only when every file is `auto`, and the embedded `review` object carries `mode: "per-file"`, the per-file results in `files`, and `limiting` naming the limiting file and rubrics.
+- The review half accepts `files` instead of `diff` for a multi-file change, exactly as `discern_review` does: the rubric is asked once per file in the same request, the review is `auto` only when every file is `auto`, and the embedded `review` object carries `mode: "per-file"`, the per-file results in `files`, and `limiting` naming the limiting file and rubrics.
 - The same 200,000-character combined budget (`request` + `tests` + all diffs) applies.
 - Truncation is per-file: only a file with its own truncated diff is demoted; claim actions stay fail-closed on any truncation.
-- Use `jev_verify` for claims without a patch review, and `jev_review` for a patch without claims.
+- Use `discern_verify` for claims without a patch review, and `discern_review` for a patch without claims.
 
-<sub>Adapted from [burnigtm/jev-mcp](https://github.com/burnigtm/jev-mcp) (MIT), via [PR #2](https://github.com/jkudish/jev-mcp/pull/2) by rimusz.</sub>
+<sub>Adapted from [burnigtm/jev-mcp](https://github.com/burnigtm/jev-mcp) (MIT), via [PR #2](https://github.com/jkudish/discern-mcp/pull/2) by rimusz.</sub>
 
 ## When to call which tool
 
-- `jev_verify`: one or more claims against evidence you already have.
-- `jev_screen`: fetched or pasted content, before it enters context.
-- `jev_noul`: a bare calibrated probability for a stated proposition.
-- `jev_find`: pick the single best candidate from up to 250.
-- `jev_rerank`: score and sort the whole list.
-- `jev_classify`: label many items against your own catalog, in batches.
-- `jev_decide`: choose between a handful of options with priorities in view.
-- `jev_compare`: how two passages relate, overall or per aspect.
-- `jev_extract`: pull field values a regex can find, verbatim.
-- `jev_audit`: extracted values (from a document, or a vision/ASR transcript) before they are trusted.
-- `jev_review`: score a proposed diff before calling the task done.
-- `jev_gate`: that same review plus completion claims checked against evidence.
+- `discern_verify`: one or more claims against evidence you already have.
+- `discern_screen`: fetched or pasted content, before it enters context.
+- `discern_noul`: a bare calibrated probability for a stated proposition.
+- `discern_find`: pick the single best candidate from up to 250.
+- `discern_rerank`: score and sort the whole list.
+- `discern_classify`: label many items against your own catalog, in batches.
+- `discern_decide`: choose between a handful of options with priorities in view.
+- `discern_compare`: how two passages relate, overall or per aspect.
+- `discern_extract`: pull field values a regex can find, verbatim.
+- `discern_audit`: extracted values (from a document, or a vision/ASR transcript) before they are trusted.
+- `discern_review`: score a proposed diff before calling the task done.
+- `discern_gate`: that same review plus completion claims checked against evidence.
 
 ## Combining the tools: task routing
 
-Routing is a good example of combining tools. Before any work starts, you want to know what kind of task this is and which of your workflows should run it. A `jev_classify` call answers the first question, a `jev_decide` call the second.
+Routing is a good example of combining tools. Before any work starts, you want to know what kind of task this is and which of your workflows should run it. A `discern_classify` call answers the first question, a `discern_decide` call the second.
 
 Everything below is an example, not a feature: the package ships the two calls, and the classes, routes, and rules are yours to define.
 
@@ -699,7 +756,7 @@ Then decide the route, feeding that answer in as evidence. The `requirements` fi
 // arguments
 {
   "decision": "Which workflow should run this task?",
-  "evidence": "jev_classify labeled the task reversible (confidence 0.97): it edits the checkout but touches no production system. Available workflows: answer, implement, escalate.",
+  "evidence": "discern_classify labeled the task reversible (confidence 0.97): it edits the checkout but touches no production system. Available workflows: answer, implement, escalate.",
   "priorities": "Automated runs must stay reversible; destructive tasks always escalate.",
   "candidates": [
     { "id": "answer", "description": "Look things up and reply. No writes." },
@@ -722,116 +779,198 @@ Then decide the route, feeding that answer in as evidence. The `requirements` fi
 - If either call comes back low-confidence or escaped, route to `escalate` (or ask a person) rather than guessing. The escape hatches exist for exactly that.
 - One classify call and one decide call per task. Repeating them on the same inputs buys nothing.
 
-<sub>Pattern credit: [@Garfielk](https://github.com/Garfielk), from the routing discussion in [#5](https://github.com/jkudish/jev-mcp/issues/5).</sub>
+<sub>Pattern credit: [@Garfielk](https://github.com/Garfielk), from the routing discussion in [#5](https://github.com/jkudish/discern-mcp/issues/5).</sub>
 
 ## Inside the harness: hooks
 
-The tools judge what the model brings into the conversation. The [hook gate example](examples/hook-gate.md) runs the same judgment out of band: a `PreToolUse` hook in Claude Code, Codex, OpenCode, or pi sends each proposed tool call to one `jev_decide` call measured against your written policy, and denies the confident violations with a reason the model can act on. The harness matcher routes for free, local skip rules and size caps defer cheaply, and anything the gate cannot confidently deny falls through to the harness's own permission flow — so a Jev outage never blocks the agent. Deny thresholds are parameters, not promises.
+The tools judge what the model brings into the conversation. The [hook gate example](examples/hook-gate.md) runs the same judgment out of band: a `PreToolUse` hook in Claude Code, Codex, OpenCode, or pi sends each proposed tool call to one `discern_decide` call measured against your written policy, and denies the confident violations with a reason the model can act on. The harness matcher routes for free, local skip rules and size caps defer cheaply, and anything the gate cannot confidently deny falls through to the harness's own permission flow, so a provider outage never blocks the agent. Deny thresholds are parameters, not promises.
 
 ## How the answers work
 
-Jev is TypeSafe's System One model: it returns typed answers with calibrated probability distributions, not generated text. A verify call is a Choice over supports / contradicts / says_nothing, so you see the whole distribution, not one label. A screen call is a set of yes/no probabilities. A find call is a Choice over your candidate ids plus an existence check. A rerank call is one yes/no relevance question per candidate. A compare call is a Choice over three relations, repeated independently per aspect. An extract call is a Choice over the candidates your regex already found, so the model picks a value but never writes one. A review call is four Score rubrics plus one safe-to-apply probability; a gate adds one Choice per completion claim, judged from evidence only. Code maps the answers to verdicts and actions; policy stays with you.
+Every tool asks typed questions of a Decisions provider. By default that is Jev, TypeSafe's System One model: it returns typed answers with calibrated probability distributions, not generated text. OpenAI's Decisions API answers the same question types with its own models. A verify call is a Choice over supports / contradicts / says_nothing, so you see the whole distribution, not one label. A screen call is a set of yes/no probabilities. A find call is a Choice over your candidate ids plus an existence check. A rerank call is one yes/no relevance question per candidate. A compare call is a Choice over three relations, repeated independently per aspect. An extract call is a Choice over the candidates your regex already found, so the model picks a value but never writes one. A review call is four Score rubrics plus one safe-to-apply probability; a gate adds one Choice per completion claim, judged from evidence only. Code maps the answers to verdicts and actions; policy stays with you.
 
 For Choice and Score, `confidence` measures how peaked the option probabilities are, scaled from 0 for a uniform distribution to 1 for all probability on one option; it is not the probability the answer is correct, so tune thresholds against observed outcomes.
 
 ## Limits and tuning
 
 - Thresholds (`auto_accept`, `block_at`, `review_at`, exists cutoffs) are starting points from the TypeSafe cookbooks. Tune them against your own data before you enforce them. See [how TypeSafe reports confidence](https://docs.typesafe.ai/confidence.md).
-- Jev is calibrated, not infallible. Typed output guarantees the interface, not the truth. Keep policy in code and escalate low-confidence results to a person or a bigger model.
-- Every result that calls the model includes token usage, so you can see what each judgment costs. A `jev_extract` call where no field reaches the model reports `usage: null`.
+- The models are calibrated, not infallible. Typed output guarantees the interface, not the truth. Keep policy in code and escalate low-confidence results to a person or a bigger model.
+- Every result that calls the model includes token usage, so you can see what each judgment costs. A `discern_extract` call where no field reaches the model reports `usage: null`.
 
 ## Configuration
 
 ### Providers
 
-Built-in provider selection runs through the shared [@jkudish/jev-agent-tools](https://github.com/jkudish/jev-agent-tools) wire package: it picks a carrier from your environment, sends the judgment, and validates the answer before any tool sees it. Four carriers are built in, tried in this order:
+Built-in provider selection runs through the shared [@jkudish/discern-sdk](https://github.com/jkudish/discern-sdk) wire package: it picks a carrier from your environment, sends the judgment, and validates the answer before any tool sees it. Auto-detection tries these in order:
 
 - **TypeSafe** (`TYPESAFE_API_KEY`): direct, and the default when set.
 - **OpenRouter** (`OPENROUTER_API_KEY`).
-- **Cloudflare Workers AI** (`CLOUDFLARE_API_TOKEN` or `JEV_CLOUDFLARE_API_TOKEN`, plus `CLOUDFLARE_ACCOUNT_ID`).
+- **Cloudflare Workers AI** (`CLOUDFLARE_API_TOKEN` or `DISCERN_CLOUDFLARE_API_TOKEN`, plus `CLOUDFLARE_ACCOUNT_ID`). Serves Jev by default, and Cloudflare's Clef with `DISCERN_MCP_MODEL=clef` or `clef-flash`; see [Cloudflare](#cloudflare).
 - **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`).
+- **A System One-compatible endpoint** (`DISCERN_API_KEY` and `DISCERN_API_BASE_URL`), only when nothing above is configured; see [Jev-compatible endpoints](#jev-compatible-endpoints).
 
-A fifth carrier, **OpenAI Decisions**, is never auto-detected; select it with `JEV_PROVIDER=openai`. See [OpenAI Decisions](#openai-decisions).
+**OpenAI Decisions** is never auto-detected; select it with `DISCERN_PROVIDER=openai`. See [OpenAI Decisions](#openai-decisions).
 
-`JEV_PROVIDER` forces one, or `compatible` for any System One-compatible endpoint. Unknown names and missing credentials are configuration errors, never silent fallbacks. For resilience reasons the OpenRouter, Cloudflare, and compatible transports are implemented locally; see [Transport resilience](#transport-resilience).
+**SubQ Decisions** is also explicit-only: `DISCERN_PROVIDER=subq`. See [SubQ](#subq).
 
-The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/jev-agent-tools#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
+`DISCERN_PROVIDER` forces one. Unknown names and missing credentials are configuration errors, never silent fallbacks. Every provider, including `compatible`, comes from the shared package with the same retry and deadline rules; see [Transport resilience](#transport-resilience).
+
+The built-ins stay limited to major providers. The no-code extension path here is the [compatible endpoint](#jev-compatible-endpoints); the [add-a-provider guide](https://github.com/jkudish/discern-sdk#adding-a-provider) in the shared package covers transport injection and third-party driver packages. Published driver packages get linked here on request.
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `TYPESAFE_API_KEY` | none | TypeSafe direct. Default provider when set. |
 | `OPENROUTER_API_KEY` | none | OpenRouter `sk-or-` key; used when `TYPESAFE_API_KEY` is absent. |
-| `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | none | Cloudflare Workers AI; used when no other provider key is present. `JEV_CLOUDFLARE_API_TOKEN` is honored first for separate credentials. |
+| `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | none | Cloudflare Workers AI; used when no other provider key is present. `DISCERN_CLOUDFLARE_API_TOKEN` is honored first for separate credentials. |
 | `AI_GATEWAY_API_KEY` | none | Vercel AI Gateway; used when no other provider key is present. |
-| `JEV_VERCEL_ZERO_DATA_RETENTION` | unset | `1` or `true` asks the Vercel AI Gateway to route only through its zero-data-retention providers; use with `JEV_PROVIDER=vercel`. See [Vercel](#vercel). |
-| `JEV_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, `openai`, or `compatible` instead of auto-detection. `openai` is only ever selected this way. |
-| `JEV_OPENAI_API_KEY` or `OPENAI_API_KEY` | none | OpenAI Decisions key, `JEV_OPENAI_API_KEY` first; used only with `JEV_PROVIDER=openai`. |
-| `JEV_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Override the OpenAI API root (`/decisions` is appended). `OPENAI_BASE_URL` is deliberately ignored. |
-| `JEV_MCP_MODEL` | `jev-latest` | Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter. |
-| `TYPESAFE_BASE_URL` | none | Custom direct endpoint (origin only; the SDK appends its route). |
-| `JEV_API_BASE_URL` + `JEV_API_KEY` | none | Jev-compatible System One endpoint and Bearer token; use with `JEV_PROVIDER=compatible`. `JEV_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
-| `JEV_MCP_REQUEST_TIMEOUT_MS` | `60000` | Whole-request deadline in milliseconds, covering every attempt, on the fetch-based transports. |
-| `JEV_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on the fetch-based transports; retries happen only on 408, 409, 429, and 500 through 599. |
-| `JEV_OPENROUTER_BASE_URL` | `https://openrouter.ai/api` | Override the OpenRouter API root (the `/alpha/decisions` path is appended; a trailing slash is tolerated). |
-| `JEV_CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Override the Cloudflare API root (`/accounts/<id>/ai/run` is appended; a trailing slash is tolerated). |
+| `DISCERN_VERCEL_ZERO_DATA_RETENTION` | unset | `1` or `true` asks the Vercel AI Gateway to route only through its zero-data-retention providers; use with `DISCERN_PROVIDER=vercel`. See [Vercel](#vercel). |
+| `DISCERN_PROVIDER` | `auto` | Force `typesafe`, `openrouter`, `cloudflare`, `vercel`, `openai`, `subq`, or `compatible` instead of auto-detection. `openai` and `subq` are explicit-only. |
+| `DISCERN_OPENAI_API_KEY` or `OPENAI_API_KEY` | none | OpenAI Decisions key, `DISCERN_OPENAI_API_KEY` first; used only with `DISCERN_PROVIDER=openai`. |
+| `DISCERN_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Override the OpenAI API root (`/decisions` is appended). `OPENAI_BASE_URL` is deliberately ignored. |
+| `DISCERN_SUBQ_API_KEY` or `SUBQ_API_KEY` | none | SubQ key, `DISCERN_SUBQ_API_KEY` first; used only with `DISCERN_PROVIDER=subq`. |
+| `DISCERN_SUBQ_BASE_URL` | `https://api.subq.ai/v1` | Override the SubQ API root (`/systemone` is appended). |
+| `DISCERN_MCP_MODEL` | `latest` | Current default (Jev, `gpt-6-luna` on OpenAI, `subq-snap-preview` on SubQ). Pin a Jev version, e.g. `jev-1.12`, or `typesafe/jev-1.13` on OpenRouter; `clef` or `clef-flash` on Cloudflare. |
+| `DISCERN_TOOL_NAMES` | `discern` | Which tool names `tools/list` shows: `discern` (`discern_*`) or `jev` (`jev_*`, the 1.x compatibility names). Both sets stay callable. Any other value fails at startup. |
+| `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` | Custom direct endpoint (origin only; `/v1/systemone` is appended). |
+| `DISCERN_API_BASE_URL` + `DISCERN_API_KEY` | none | System One-compatible endpoint and Bearer token; used when no other provider is configured, or with `DISCERN_PROVIDER=compatible`. `DISCERN_API_BASE_URL` is the full POST URL including the `/v1/systemone` path. |
+| `DISCERN_MCP_REQUEST_TIMEOUT_MS` | `60000` | Whole-request deadline in milliseconds, covering every attempt, on every provider. |
+| `DISCERN_MCP_MAX_ATTEMPTS` | `3` | Total attempts per request (clamped 1..6) on every provider; retries happen only on 408, 409, 429, and 500 through 599. |
+| `DISCERN_OPENROUTER_BASE_URL` | `https://openrouter.ai/api` | Override the OpenRouter API root (the `/alpha/decisions` path is appended; a trailing slash is tolerated). |
+| `DISCERN_CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Override the Cloudflare API root (`/accounts/<id>/ai/run` is appended; a trailing slash is tolerated). |
+
+Through 1.x, every `DISCERN_*` variable in this table can also be set under its old `JEV_*` name; see [Migrating from jev-mcp](#migrating-from-jev-mcp).
 
 ### Transport resilience
 
-The fetch-based transports (OpenRouter, Cloudflare, and the Jev-compatible endpoint) retry only on the standard not-processed status set (408, 409, 429, and 500 through 599), with jittered exponential backoff, at most `JEV_MCP_MAX_ATTEMPTS` total attempts, all inside one `JEV_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry, non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error bodies on those transports are redacted, so a reflecting endpoint can never echo a configured key into MCP-visible errors. The only exception is the fixed OpenRouter token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Direct TypeSafe, Vercel, and OpenAI calls use `@jkudish/jev-agent-tools`, whose direct fetch path avoids the SDK cancellation crash ([typesafe-sdk-js#2](https://github.com/typesafe-ai/typesafe-sdk-js/issues/2)); no retry or deadline uniformity is claimed for those three. Research and the original report: [issue #23](https://github.com/jkudish/jev-mcp/issues/23) by oppih.
+Every provider shares one HTTP path from `@jkudish/discern-sdk`. It retries only the standard not-processed statuses (408, 409, 429, and 500 through 599), honoring `Retry-After` (capped at 5 s) or else a jittered exponential backoff, at most `DISCERN_MCP_MAX_ATTEMPTS` total attempts, all inside one `DISCERN_MCP_REQUEST_TIMEOUT_MS` deadline. A status cannot prove the request was not processed, but that allowlist is the conservative retry trigger; ambiguous network-level failures (connection reset, TLS errors) are never retried, because without an idempotency key a re-send can double-process a paid call. Everything else fails immediately: caller cancellations, deadline expiry (reported as `no answer within the Nms deadline`), non-retryable statuses, unparseable bodies, and responses over 1,000,000 bytes, a ceiling enforced while the body streams rather than after buffering. A cancelled MCP call aborts the in-flight HTTP request, cuts any backoff sleep short, and is never re-sent. Error messages are fixed strings with the provider name and numeric status; response bodies never reach them, so a reflecting endpoint cannot echo a configured key into MCP-visible errors. The only upstream detail exposed is OpenRouter's allow-listed token-limit code `max_tokens_exceeded`; see [OpenRouter](#openrouter). Research and the original report: [issue #23](https://github.com/jkudish/discern-mcp/issues/23) by oppih.
 
 ### Vercel
 
 With `AI_GATEWAY_API_KEY` set, judgments run through the Vercel AI Gateway at `typesafe-ai/jev`, using the shared wire package's evaluation request. Answers are adapted back to this package's shapes, including TypeSafe's confidence statistic. Gateway calls appear in Vercel logs and budgets.
 
-- Set `JEV_VERCEL_ZERO_DATA_RETENTION=1` or `true` to send `providerOptions.gateway.zeroDataRetention: true` with every Gateway request.
+- Set `DISCERN_VERCEL_ZERO_DATA_RETENTION=1` or `true` to send `providerOptions.gateway.zeroDataRetention: true` with every Gateway request.
 - This is Vercel's per-request zero data retention (ZDR) routing restriction. The Gateway routes only through providers that have ZDR agreements with Vercel, including fallbacks. If none is available for the model, the Gateway rejects the request.
 - Vercel offers it on Pro and Enterprise plans. See [Vercel's ZDR docs](https://vercel.com/docs/ai-gateway/security-and-compliance/zdr) for the current provider list, terms, and exceptions.
 - Unset, empty, `0`, or `false` (case-insensitive) leaves requests unchanged. Any other value is a configuration error before a request is sent.
-- Only the Vercel carrier reads the setting. Auto-selection prefers TypeSafe, OpenRouter, and Cloudflare when their keys are present, so set `JEV_PROVIDER=vercel` when every judgment must carry this restriction.
+- Only the Vercel carrier reads the setting. Auto-selection prefers TypeSafe, OpenRouter, and Cloudflare when their keys are present, so set `DISCERN_PROVIDER=vercel` when every judgment must carry this restriction.
 - It is a Gateway routing restriction under Vercel and provider policies, not an end-to-end no-retention guarantee. It does not control this server, your MCP client, their logs, or other providers.
 
 ### OpenAI Decisions
 
-`JEV_PROVIDER=openai` sends judgments to [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (public beta). `jev-latest` maps to `gpt-6-luna`; set `JEV_MCP_MODEL` to another OpenAI model name to pin one. Results report `provider: "openai"` and the model OpenAI answered with.
+`DISCERN_PROVIDER=openai` sends judgments to [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (public beta). The default `latest` maps to `gpt-6-luna`; set `DISCERN_MCP_MODEL` to another OpenAI model name to pin one. Results report `provider: "openai"` and the model OpenAI answered with.
 
 - This is not Jev. `gpt-6-luna` has its own calibration, so `auto_accept`, `review_at`, and other thresholds tuned on Jev need re-checking against your own labeled cases before you rely on them.
 - It is never auto-detected, because `OPENAI_API_KEY` is set in many environments that never chose it.
-- The shared package translates the wire format: state becomes a labeled, pretty-printed JSON `input`, each noul becomes a true/false choice carrying its criteria, and the answers array is keyed back by question name. Requests above OpenAI's 200-question limit (for example a 250-candidate `jev_rerank`) are split into concurrent requests.
+- The shared package translates the wire format: state becomes a labeled, pretty-printed JSON `input`, each noul becomes a true/false choice carrying its criteria, and the answers array is keyed back by question name. Requests above OpenAI's 200-question limit (for example a 250-candidate `discern_rerank`) are split into concurrent requests.
 - A question OpenAI declines comes back as a refusal. The affected judgment is `invalid_response`; its siblings are unaffected.
 - Data goes to OpenAI under your organization's data controls. Zero data retention applies only if your organization is eligible and has it enabled.
+
+### SubQ
+
+Set `DISCERN_PROVIDER=subq` and `DISCERN_SUBQ_API_KEY` (or `SUBQ_API_KEY`). `latest` and `jev-latest` map to `subq-snap-preview`; `DISCERN_MCP_MODEL` can pin an explicit ID. Results report `provider: "subq"` and the effective response model.
+
+- [Snap is in public preview](https://docs.subq.ai/endpoints/decisions-api/), with its own calibration. Existing thresholds stay unchanged; evaluate labeled cases before relying on them for policy.
+- Native structured state, instructions and criteria are preserved, as are probabilities and fractional scores. Limits: 255 Choice options, 10 Score levels, 100-character question IDs, 393,216-token context (near-limit requests may fail). Image evidence uses the bounded shared-state contract above, repeated per chunk.
+- We observed a 16-question request limit. Larger calls use serial chunks under one shared deadline, repeating the state and summing usage. A failed or malformed chunk invalidates the whole call's judgments; no partial answers are exposed. Earlier chunks may still be billed. Inconsistent effective models fail the call.
+- This all-or-nothing validation applies to **every SubQ call**, including 16 or fewer questions: one invalid or refused answer marks all judgments in that call `invalid_response`. Siblings are not preserved as they are on OpenAI.
+- Published pricing is $0.05 per million input tokens, output free. Batch latency and input usage grow with repeated state.
+- **API data is retained indefinitely by default.** Organization-level ZDR requires contacting SubQ. There is no documented Decisions `store:false` control; review [retention](https://docs.subq.ai/using-the-api/data-retention/) before sending sensitive inputs.
 
 ### Cloudflare
 
 With `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set (and no other provider key), judgments run through Cloudflare Workers AI at `typesafe/jev`, the single always-current alias. Usage tokens come back on every call. Cloudflare serves one alias rather than pinned versions, and pricing is listed in the Cloudflare dashboard. Direct TypeSafe remains the recommended default when you have several keys.
 
+The same provider runs Cloudflare's own [Clef decision models](https://blog.cloudflare.com/clef-decision-models/). Set `DISCERN_PROVIDER=cloudflare` and `DISCERN_MCP_MODEL=clef` (the larger model) or `clef-flash` (the low-latency one); any `@cf/` model id also passes through unchanged. Clef uses the same request and answer format as Jev, so every tool works unchanged and results report `model: "clef"` or `"clef-flash"`.
+
+- Clef is not Jev. It has its own calibration, so `auto_accept`, `review_at`, and other thresholds tuned on Jev need re-checking against your own labeled cases.
+- The API token needs Workers AI access. `clef-flash` answers in a few hundred milliseconds warm but can take several seconds on a cold start.
+
 ### OpenRouter
 
-If you already have an OpenRouter key, that is all you need: with no `TYPESAFE_API_KEY` present, every call goes through OpenRouter's Decisions API at identical pricing. The endpoint is alpha and adds a hop. The default `jev-latest` uses OpenRouter's moving `~typesafe/jev-latest` alias; pin `typesafe/jev-1.13` for reproducible routing. Results report the snapshot OpenRouter returns. Direct TypeSafe remains the recommended default when you have both keys.
+If you already have an OpenRouter key, that is all you need: with no `TYPESAFE_API_KEY` present, every call goes through OpenRouter's Decisions API at identical pricing. The endpoint is alpha and adds a hop. The default `latest` uses OpenRouter's moving `~typesafe/jev-latest` alias; pin `typesafe/jev-1.13` for reproducible routing. Results report the snapshot OpenRouter returns. Direct TypeSafe remains the recommended default when you have both keys.
 
-When a Jev request exceeds its token limit, OpenRouter errors report `OpenRouter decisions API 400 (max_tokens_exceeded)`. Other upstream text and unknown error types stay hidden because they can echo credentials or request content.
+When a Jev request exceeds its token limit, OpenRouter errors report `Discern provider openrouter: request failed (HTTP 400, max_tokens_exceeded)`. Other upstream text and unknown error types stay hidden because they can echo credentials or request content.
 
 ### Jev-compatible endpoints
 
 For a service that implements the same System One request and response contract, set the provider explicitly:
 
 ```bash
-export JEV_PROVIDER=compatible
-export JEV_API_BASE_URL=https://api.openjev.sh/v1/systemone
-export JEV_API_KEY=your-compatible-provider-key
-export JEV_MCP_MODEL=openjev
+export DISCERN_PROVIDER=compatible
+export DISCERN_API_BASE_URL=https://api.openjev.sh/v1/systemone
+export DISCERN_API_KEY=your-compatible-provider-key
+export DISCERN_MCP_MODEL=openjev
 ```
 
-The server sends `POST` requests with `{ model, state, questions }` and requires the standard response shape: an `answers` object plus a `usage` object reporting `input_tokens` and `output_tokens`, with an optional `model` string echoing the model that answered. Envelope problems (a non-object body or `answers`, malformed `usage` counts, a non-string `model`) are rejected at the transport boundary. Individual answers are not judged here: each tool validates them under its own `invalid_response` contract, so a missing or malformed answer fails closed in the tool instead of aborting the call. `JEV_API_BASE_URL` must be the full endpoint URL including the `/v1/systemone` path; it is used verbatim, with no trailing-slash or path normalization. The endpoint and credentials are kept in the local process environment. This adapter is provider-neutral; OpenJEV is one example, not a hard-coded dependency.
+The server sends `POST` requests with `{ model, state, questions }` and requires the standard response shape: an `answers` object plus a `usage` object reporting `input_tokens` and `output_tokens`, with an optional `model` string echoing the model that answered. A missing `usage` counter counts as zero. Envelope problems (a non-object `answers`, malformed `usage` counts, a non-string `model`) fail every judgment in the call closed as `invalid_response`, the same as on every other provider; an unparseable or non-object body is a request error. Individual answers are validated by each tool under its own `invalid_response` contract, so one malformed answer fails only its judgment. `DISCERN_API_BASE_URL` must be the full endpoint URL including the `/v1/systemone` path; it is used verbatim, with no trailing-slash or path normalization. The endpoint and credentials are kept in the local process environment. This adapter is provider-neutral; OpenJEV is one example, not a hard-coded dependency.
 
-One compatibility note: the default model is `jev-latest`, and not every endpoint implements that alias. If calls fail against your endpoint with a client-error status, set `JEV_MCP_MODEL` to the model id your endpoint supports (bare, without a provider prefix like `opencode/`).
+One compatibility note: the default `latest` is sent to compatible endpoints as `jev-latest`, and not every endpoint implements that alias. If calls fail against your endpoint with a client-error status, set `DISCERN_MCP_MODEL` to the model id your endpoint supports (bare, without a provider prefix like `opencode/`).
+
+## Migrating from jev-mcp
+
+jev-mcp became discern-mcp at 1.0.0. "Jev" is TypeSafe's model, and the server now also runs on Cloudflare's Clef and OpenAI's Decisions API, so the package takes a provider-neutral name. During 1.x the old package name, tool names, and environment variables all keep working; they are removed in 2.0. Two things change immediately: `serverInfo.name` is `discern-mcp`, and the agent skill moved from `skills/jev` to `skills/discern` in the `@jkudish/discern-mcp` package.
+
+To migrate:
+
+1. Replace `@jkudish/jev-mcp` with `@jkudish/discern-mcp` in your MCP config (`npx -y @jkudish/discern-mcp`).
+2. Rename `JEV_*` environment variables to `DISCERN_*`.
+3. Update permission allowlists and prompts from `jev_*` to `discern_*` tool names.
+
+**Compatibility package.** `@jkudish/jev-mcp` 1.0.0 is a thin package that depends on `@jkudish/discern-mcp` and runs it with `DISCERN_TOOL_NAMES=jev`. Existing `npx -y @jkudish/jev-mcp` configs and `jev_*` permission allowlists keep working unchanged, and `@jkudish/jev-mcp/server` re-exports the library entry. Its `jev-mcp` bin respects an explicit `DISCERN_TOOL_NAMES`.
+
+**Tool names.** `tools/list` shows one set of names; both sets are always callable, and each result's `tool` field echoes the name you called.
+
+| 0.x name | 1.0 name |
+| --- | --- |
+| `jev_verify` | `discern_verify` |
+| `jev_screen` | `discern_screen` |
+| `jev_noul` | `discern_noul` |
+| `jev_find` | `discern_find` |
+| `jev_classify` | `discern_classify` |
+| `jev_decide` | `discern_decide` |
+| `jev_rerank` | `discern_rerank` |
+| `jev_compare` | `discern_compare` |
+| `jev_extract` | `discern_extract` |
+| `jev_audit` | `discern_audit` |
+| `jev_review` | `discern_review` |
+| `jev_gate` | `discern_gate` |
+
+`DISCERN_TOOL_NAMES` picks which set is listed: `discern` (the default) lists `discern_*`; `jev` lists `jev_*`, which is what the compatibility package sets. Any other value fails at startup.
+
+**Environment variables.** Every `JEV_<X>` variable is read as an alias of `DISCERN_<X>`. Each one in use prints one deprecation line on stderr at startup (stdout carries MCP and stays clean). If both names are set, the `DISCERN_` value wins when they match; different values are a startup error that names both variables and never prints their values. Empty values count as unset.
+
+| 0.x variable | 1.0 variable |
+| --- | --- |
+| `JEV_PROVIDER` | `DISCERN_PROVIDER` |
+| `JEV_MCP_MODEL` | `DISCERN_MCP_MODEL` |
+| `JEV_OPENAI_API_KEY` | `DISCERN_OPENAI_API_KEY` |
+| `JEV_OPENAI_BASE_URL` | `DISCERN_OPENAI_BASE_URL` |
+| `JEV_SUBQ_API_KEY` | `DISCERN_SUBQ_API_KEY` |
+| `JEV_SUBQ_BASE_URL` | `DISCERN_SUBQ_BASE_URL` |
+| `JEV_OPENROUTER_BASE_URL` | `DISCERN_OPENROUTER_BASE_URL` |
+| `JEV_CLOUDFLARE_API_TOKEN` | `DISCERN_CLOUDFLARE_API_TOKEN` |
+| `JEV_CLOUDFLARE_BASE_URL` | `DISCERN_CLOUDFLARE_BASE_URL` |
+| `JEV_VERCEL_ZERO_DATA_RETENTION` | `DISCERN_VERCEL_ZERO_DATA_RETENTION` |
+| `JEV_API_BASE_URL` | `DISCERN_API_BASE_URL` |
+| `JEV_API_KEY` | `DISCERN_API_KEY` |
+| `JEV_MCP_REQUEST_TIMEOUT_MS` | `DISCERN_MCP_REQUEST_TIMEOUT_MS` |
+| `JEV_MCP_MAX_ATTEMPTS` | `DISCERN_MCP_MAX_ATTEMPTS` |
+| `JEV_MCP_TRANSPORT` | `DISCERN_MCP_TRANSPORT` |
+| `JEV_MCP_AUTH_TOKEN` | `DISCERN_MCP_AUTH_TOKEN` |
+| `JEV_MCP_PATH_TOKEN` | `DISCERN_MCP_PATH_TOKEN` |
+| `JEV_MCP_MAX_CONCURRENCY` | `DISCERN_MCP_MAX_CONCURRENCY` |
+
+Only these variables are aliased; other `JEV_*` variables are ignored. Provider keys without the prefix (`TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `AI_GATEWAY_API_KEY`, `HOST`, `PORT`) are unchanged.
+
+**Removal in 2.0.** The `jev_*` tool names, `JEV_*` variables, `DISCERN_TOOL_NAMES=jev`, and the `@jkudish/jev-mcp` package are removed in 2.0.
 
 ## Also in the family
 
-Need those judgments to drive a real browser? [Jev Browser](https://github.com/jkudish/jev-browser) gives an agent a task and a URL and lets Jev pick the actions: click, type, select, stop. It uses the same judgment style this server exposes. The npm package is [@jkudish/jev-browser](https://www.npmjs.com/package/@jkudish/jev-browser).
+Need those judgments to drive a real browser? [Discern Browser](https://github.com/jkudish/discern-browser) gives an agent a task and a URL and lets the judgment model pick the actions: click, type, select, stop. It uses the same judgment style this server exposes. The npm package is [@jkudish/discern-browser](https://www.npmjs.com/package/@jkudish/discern-browser).
 
 ## Sponsoring
 
-If you find Jev MCP useful, consider becoming a [sponsor](https://github.com/sponsors/jkudish) or [donating](https://stripe.com/@jkudish).
+If you find Discern MCP useful, consider becoming a [sponsor](https://github.com/sponsors/jkudish) or [donating](https://stripe.com/@jkudish).
 
 ## Development
 
