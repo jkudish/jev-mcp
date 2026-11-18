@@ -577,6 +577,7 @@ Score a proposed diff against the request before the task is called done. Jev an
 
 - Why the example escalates: the composite clears the floor, but the failing test drags `safe_to_apply` to 0.24 and rubric confidences sit under `review_at` — decent scores don't sail through on their own.
 - Rubric scores run 0..2. Higher is better for `correctness` and `spec_match`; higher is worse for `test_gap` and `blast_radius`, and the composite inverts those two before weighting, so a composite of 1.0 means favorable on every rubric.
+- `spec_match` checks every explicit requirement, exclusion, conditional and ordering constraint, and inclusive or exclusive boundary. The full-match score requires all of them; a missed boundary or constraint is a partial match.
 - A score answer may carry its full probability distribution over the three options; when the provider reports one, it is validated (exact keys, probabilities summing to one, expected value within a small tolerance of the reported score) and returned in `scores.*.probabilities`. Absent means "not reported" and stays `null`; a distribution that is present but malformed or contradictory marks that rubric `invalid_response`.
 - `reason_codes` collects why the review decided as it did: `invalid_response`, `unknown_confidence`, `confidence_below_review`, `safe_to_apply_below_review`, `confidence_below_auto_accept`, `safe_to_apply_below_auto_accept`, `composite_below_floor`, `incomplete_context`, `accepted`. `limiting_rubrics` names the rubric(s) that bound the decision, ties included: the null-confidence rubrics when confidence is unknown, every rubric tied at the minimum confidence when a confidence threshold blocks, and the least favorable rubrics when the composite floor blocks.
 - `auto` requires `safe_to_apply` and every rubric confidence at `auto_accept` and the composite at `composite_floor`. `safe_to_apply` or any rubric confidence below `review_at`, or unknown, escalates; a composite below `composite_floor` returns `review`, not `escalate`. Unknown confidence counts as escalate, never as a value that can satisfy a threshold.
@@ -588,7 +589,7 @@ Score a proposed diff against the request before the task is called done. Jev an
 - One request must fit the combined budget: `request` + `tests` + all file diffs together stay under 200,000 characters.
 - Truncation is per-file: only the file whose own diff (or the shared request/tests context) was truncated is demoted to `review`; an intact file is never demoted for a truncated sibling.
 
-<sub>Adapted from [burnigtm/jev-mcp](https://github.com/burnigtm/jev-mcp) (MIT), via [PR #2](https://github.com/jkudish/jev-mcp/pull/2) by rimusz.</sub>
+<sub>Question design follows TypeSafe's [How to build with System One](https://docs.typesafe.ai/concepts/how-to-build-with-system-one) guidance. Adapted from [burnigtm/jev-mcp](https://github.com/burnigtm/jev-mcp) (MIT), via [PR #2](https://github.com/jkudish/jev-mcp/pull/2) by rimusz.</sub>
 
 ### jev_gate
 

@@ -1478,11 +1478,19 @@ function reviewQuestions(extraFraming = "", scope = "", keyPrefix = ""): Record<
       "Uncertain; needs a closer look or tests",
       "Looks correct for the request",
     ]),
-    [`${keyPrefix}spec_match`]: score(frame("How well does the change match the user's request, not extra work?"), [
-      "Misses the request or solves a different problem",
-      "Partial match; important pieces missing",
-      "Matches the request",
-    ]),
+    [`${keyPrefix}spec_match`]: score(
+      frame(
+        "How fully does the change satisfy every explicit requirement in the user's request, without adding material unrequested scope? " +
+          "Check each stated requirement, exclusion, conditional constraint, threshold, and inclusive or exclusive boundary; also check ordering and duplicate constraints. " +
+          "A requirement that the value is on or after a boundary requires an inclusive comparison, while after the boundary requires an exclusive comparison. " +
+          "Treat a missed or contradicted requirement as a partial match; assign the full match only when every explicit requirement is satisfied.",
+      ),
+      [
+        "Misses, contradicts, or omits an explicit requirement; solves a different problem; or adds material unrequested scope",
+        "Satisfies the core request but misses or leaves unresolved at least one explicit requirement, boundary, exclusion, ordering, or duplicate constraint",
+        "Satisfies every explicit requirement and boundary, with no material unrequested scope",
+      ],
+    ),
     [`${keyPrefix}test_gap`]: score(frame("How large is the test gap for this change?"), [
       "Covered, or tests are not applicable to this change",
       "Some gaps remain on less critical paths",

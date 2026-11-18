@@ -1541,6 +1541,18 @@ test("jev_review returns auto on a strong patch and sends anti-injection framing
   });
 });
 
+test("jev_review spec_match checks every explicit constraint and boundary", async () => {
+  await withMock(() => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }), async (client, requests) => {
+    await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS });
+    const question = requests[0].body.questions.spec_match;
+    assert.match(question.instructions, /every explicit requirement/);
+    assert.match(question.instructions, /inclusive or exclusive boundary/);
+    assert.match(question.instructions, /ordering and duplicate constraints/);
+    assert.match(question.instructions, /full match only when every explicit requirement is satisfied/);
+    assert.match(question.criteria[1], /misses or leaves unresolved at least one explicit requirement/);
+  });
+});
+
 test("jev_review demotes auto when the diff is truncated at the document cap", async () => {
   await withMock(() => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }), async (client, requests) => {
     const result = await client.callTool({
