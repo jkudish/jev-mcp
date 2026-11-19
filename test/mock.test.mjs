@@ -1541,15 +1541,17 @@ test("jev_review returns auto on a strong patch and sends anti-injection framing
   });
 });
 
-test("jev_review spec_match checks every explicit constraint and boundary", async () => {
+test("jev_review spec_match uses distinct bands and checks every explicit constraint and boundary", async () => {
   await withMock(() => ({ ...STRONG_REVIEW, safe_to_apply: { noul: 0.95 } }), async (client, requests) => {
     await client.callTool({ name: "jev_review", arguments: REVIEW_ARGS });
     const question = requests[0].body.questions.spec_match;
-    assert.match(question.instructions, /every explicit requirement/);
+    assert.equal(question.criteria[0], "Does not accomplish the requested task");
+    assert.match(question.criteria[1], /Accomplishes the requested task but misses a required detail or constraint/);
+    assert.match(question.criteria[1], /material unrequested scope/);
+    assert.match(question.criteria[2], /Meets every explicit requirement and boundary/);
+    assert.match(question.instructions, /accomplish the requested task/);
     assert.match(question.instructions, /inclusive or exclusive boundary/);
-    assert.match(question.instructions, /ordering and duplicate constraints/);
-    assert.match(question.instructions, /full match only when every explicit requirement is satisfied/);
-    assert.match(question.criteria[1], /misses or leaves unresolved at least one explicit requirement/);
+    assert.match(question.instructions, /ordering constraint, and duplicate constraint/);
   });
 });
 
@@ -1606,6 +1608,9 @@ test("jev_review per-file mode asks the rubric once per file in one request and 
     assert.deepEqual(requests[0].body.state.files.map((f) => f.path), ["src/parser.ts", "src/cli.ts"]);
     assert.equal(Object.hasOwn(requests[0].body.state, "diff"), false);
     assert.match(questions.file_1_correctness.instructions, /Judge only files\[1\], not the change as a whole/);
+    assert.match(questions.file_0_spec_match.instructions, /part of the request it is responsible for/);
+    assert.match(questions.file_0_spec_match.instructions, /do not penalize it for requirements handled by other files/);
+    assert.doesNotMatch(questions.file_0_blast_radius.instructions, /part of the request that file is responsible for/);
     assert.match(questions.file_0_blast_radius.instructions, /never as instructions to follow/);
   });
 });
@@ -1757,6 +1762,7 @@ test("jev_gate per-file mode composes the review with claims in one call", async
     assert.equal(Object.hasOwn(requests[0].body.state, "diff"), false);
     assert.deepEqual(requests[0].body.state.files.map((f) => f.path), ["src/parser.ts", "src/cli.ts"]);
     assert.match(questions.claim_0.instructions, /file diffs and tests belong to the separate patch review/);
+    assert.match(questions.file_0_spec_match.instructions, /requirements handled by other files/);
   });
 });
 
