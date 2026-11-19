@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.0
+
+- Clarified `spec_match` scoring in `jev_review` and `jev_gate`: 0 means the task was not accomplished, 1 means it was accomplished but misses a required detail or adds material unrequested scope, and 2 means every explicit requirement and boundary is met without material unrequested scope. Per-file scoring considers only each file's responsibilities. Scores may shift slightly; thresholds and weights are unchanged. Thanks to [xenstar](https://github.com/xenstar) for [#67](https://github.com/jkudish/jev-mcp/pull/67).
+
 ## 0.14.8
 
 - Updated locked Hono and Node HTTP adapter dependencies to address upstream security advisories. These lockfile updates do not enforce a minimum in consumers’ existing lockfiles.

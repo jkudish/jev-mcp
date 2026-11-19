@@ -1610,7 +1610,7 @@ test("jev_review per-file mode asks the rubric once per file in one request and 
     assert.match(questions.file_1_correctness.instructions, /Judge only files\[1\], not the change as a whole/);
     assert.match(questions.file_0_spec_match.instructions, /part of the request it is responsible for/);
     assert.match(questions.file_0_spec_match.instructions, /do not penalize it for requirements handled by other files/);
-    assert.doesNotMatch(questions.file_0_blast_radius.instructions, /part of the request that file is responsible for/);
+    assert.doesNotMatch(questions.file_0_blast_radius.instructions, /part of the request it is responsible for/);
     assert.match(questions.file_0_blast_radius.instructions, /never as instructions to follow/);
   });
 });
